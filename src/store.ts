@@ -1,27 +1,35 @@
 import { create } from 'zustand'
 import { get as idbGet, set as idbSet } from 'idb-keyval'
+import { makeBlock, type Workspace } from '../shared/blocks.ts'
 import type { AISettings, Block, BlockType } from './types'
 
 const DB_KEY = 'notion-re:workspace'
 const SETTINGS_KEY = 'notion-re:ai-settings'
 
-export const uid = () => crypto.randomUUID()
-
 const now = () => Date.now()
 
-function makeBlock(type: BlockType, parent_id: string | null, title = ''): Block {
-  const t = now()
-  return {
-    id: uid(),
-    type,
-    parent_id,
-    content: [],
-    properties: { title, ...(type === 'to_do' ? { checked: false } : {}) },
-    format: {},
-    alive: true,
-    created_time: t,
-    last_edited_time: t,
+/** Live updates: the server pings us whenever the workspace file changes. */
+function listenForChanges() {
+  const es = new EventSource('/api/events')
+  let busy = false
+  let again = false
+  const refresh = async () => {
+    if (busy) {
+      again = true
+      return
+    }
+    busy = true
+    try {
+      do {
+        again = false
+        const remote = await fetchServerWorkspace()
+        if (remote) useStore.getState().mergeRemote(remote)
+      } while (again)
+    } finally {
+      busy = false
+    }
   }
+  es.onmessage = refresh
 }
 
 /** Where the editor should put the caret next render. */
@@ -39,6 +47,7 @@ interface State {
   settings: AISettings
 
   load: () => Promise<void>
+  mergeRemote: (remote: Workspace) => void
   openPage: (id: string | null) => void
   requestFocus: (f: FocusRequest | null) => void
 
@@ -86,14 +95,48 @@ function welcomeWorkspace() {
   return { blocks, rootPages: [page.id], currentPageId: page.id }
 }
 
+// ---- persistence ----
+// "server" mode: the local dev server stores the workspace in data/workspace.json,
+// which Claude can also edit through the MCP server. "local" mode (no server, e.g. a
+// static build): everything lives in this browser's IndexedDB.
+let mode: 'server' | 'local' = 'local'
+/** Blocks as last confirmed by the server — used to send only what changed. */
+let synced: Record<string, Block> = {}
+let syncedRoots: string[] = []
+
+function pushToServer(s: Pick<State, 'blocks' | 'rootPages'>, beacon = false) {
+  const changed = Object.values(s.blocks).filter((b) => synced[b.id] !== b)
+  const deleted = Object.keys(synced).filter((id) => !(id in s.blocks))
+  if (!changed.length && !deleted.length && s.rootPages === syncedRoots) return
+  const body = JSON.stringify({ blocks: changed, deleted, rootPages: s.rootPages })
+  const prev = { synced, syncedRoots }
+  synced = { ...s.blocks }
+  syncedRoots = s.rootPages
+  if (beacon) {
+    navigator.sendBeacon('/api/sync', new Blob([body], { type: 'application/json' }))
+    return
+  }
+  fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+    .then((r) => {
+      if (!r.ok) throw new Error(String(r.status))
+    })
+    .catch(() => {
+      // Retry these changes on the next save.
+      synced = prev.synced
+      syncedRoots = prev.syncedRoots
+    })
+}
+
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let pending: State | null = null
-function writeNow() {
+function writeNow(beacon = false) {
   clearTimeout(saveTimer)
   if (!pending) return
   const s = pending
   pending = null
-  idbSet(DB_KEY, { blocks: s.blocks, rootPages: s.rootPages, currentPageId: s.currentPageId })
+  localStorage.setItem('notion-re:current-page', s.currentPageId ?? '')
+  if (mode === 'server') pushToServer(s, beacon)
+  else idbSet(DB_KEY, { blocks: s.blocks, rootPages: s.rootPages, currentPageId: s.currentPageId })
 }
 function persist(s: State) {
   pending = s
@@ -101,8 +144,18 @@ function persist(s: State) {
   saveTimer = setTimeout(writeNow, 300)
 }
 // Don't lose the last keystrokes when the tab is closed or reloaded.
-window.addEventListener('pagehide', writeNow)
+window.addEventListener('pagehide', () => writeNow(true))
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && writeNow())
+
+async function fetchServerWorkspace(): Promise<Workspace | null | undefined> {
+  try {
+    const r = await fetch('/api/workspace')
+    if (!r.ok || !r.headers.get('content-type')?.includes('json')) return undefined
+    return await r.json()
+  } catch {
+    return undefined
+  }
+}
 
 export const useStore = create<State>((set, get) => {
   /** Apply an immutable update to the blocks map and persist. */
@@ -130,10 +183,58 @@ export const useStore = create<State>((set, get) => {
     settings: defaultSettings,
 
     load: async () => {
-      const [data, settings] = await Promise.all([idbGet(DB_KEY), idbGet(SETTINGS_KEY)])
-      const ws = data ?? welcomeWorkspace()
-      set({ ...ws, settings: { ...defaultSettings, ...settings }, loaded: true })
-      if (!data) persist(get())
+      const [server, local, settings] = await Promise.all([fetchServerWorkspace(), idbGet(DB_KEY), idbGet(SETTINGS_KEY)])
+      const savedPage = localStorage.getItem('notion-re:current-page')
+      let ws: Workspace & { currentPageId?: string | null }
+      let seed = false
+      if (server !== undefined) {
+        mode = 'server'
+        if (server) {
+          ws = server
+          synced = { ...server.blocks }
+          syncedRoots = server.rootPages
+        } else {
+          // First run with the server: move any pages from browser storage into the file.
+          ws = local ?? welcomeWorkspace()
+          seed = true
+        }
+      } else {
+        ws = local ?? welcomeWorkspace()
+        seed = !local
+      }
+      const pick = [savedPage, ws.currentPageId, ws.rootPages.find((id) => ws.blocks[id]?.alive)]
+      const currentPageId = pick.find((id) => id && ws.blocks[id]) ?? null
+      set({ blocks: ws.blocks, rootPages: ws.rootPages, currentPageId, settings: { ...defaultSettings, ...settings }, loaded: true })
+      if (seed) persist(get())
+      if (mode === 'server') listenForChanges()
+    },
+
+    mergeRemote: (remote) => {
+      const s = get()
+      const blocks = { ...s.blocks }
+      let changed = false
+      for (const [id, rb] of Object.entries(remote.blocks)) {
+        const lb = blocks[id]
+        if (!lb || rb.last_edited_time > lb.last_edited_time) {
+          blocks[id] = rb
+          synced[id] = rb
+          changed = true
+        } else if (lb.last_edited_time === rb.last_edited_time) synced[id] = lb
+      }
+      // Removed on the server, and not something new we haven't uploaded yet.
+      for (const id of Object.keys(blocks)) {
+        if (!(id in remote.blocks) && id in synced) {
+          delete blocks[id]
+          delete synced[id]
+          changed = true
+        }
+      }
+      const roots = [...remote.rootPages, ...s.rootPages.filter((id) => !remote.rootPages.includes(id))].filter((id) => blocks[id])
+      const rootsChanged = roots.join() !== s.rootPages.join()
+      if (!changed && !rootsChanged) return
+      syncedRoots = roots
+      const currentPageId = s.currentPageId && blocks[s.currentPageId] ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
+      set({ blocks, rootPages: rootsChanged ? roots : s.rootPages, currentPageId })
     },
 
     openPage: (id) => {

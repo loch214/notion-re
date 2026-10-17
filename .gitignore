@@ -6,3 +6,7 @@ analysis/
 
 # Core module kept private (showcase repo does not build without it)
 src/ai.ts
+server/mcp.ts
+
+# Local workspace data
+data/

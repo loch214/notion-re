@@ -54,7 +54,7 @@ interface State {
   createPage: (parentId: string | null, title?: string) => string
   /** New full-page database, at the top level or inside `parent` (after block `after`). Opens it. */
   createDatabase: (opts: { parent: string | null; after?: string }) => string
-  addRow: (dbId: string, title?: string) => string
+  addRow: (dbId: string, title?: string, cells?: Record<string, CellValue>) => string
   setCell: (rowId: string, propId: string, value: CellValue) => void
   /** Copy a block or page (with everything inside it) right after the original. */
   duplicate: (id: string) => string
@@ -68,6 +68,107 @@ interface State {
   outdent: (id: string) => void
   moveBlock: (id: string, targetId: string, position: 'before' | 'after') => void
   saveSettings: (s: AISettings) => void
+
+  /** Bumped whenever the undo/redo stacks change, so UI can re-render. */
+  historyTick: number
+  /** Latest screen-reader message ("Undone", "Nothing to undo", …). */
+  announcement: string
+  toast: Toast | null
+  undo: () => void
+  redo: () => void
+  /** Run several actions as one undo step (e.g. splitting a block with Enter). */
+  transact: (fn: () => void) => void
+  /** Record remote changes (e.g. an AI turn) under one named undo step until `endCheckpoint`. */
+  beginCheckpoint: (name: string) => void
+  endCheckpoint: (name: string) => void
+  /** Undo a named step wherever it is in the stack. */
+  undoNamed: (name: string) => { restored: number; skipped: number } | null
+  showToast: (t: Toast | null) => void
+}
+
+export interface Toast {
+  label: string
+  action?: { label: string; run: () => void }
+}
+
+// ---- undo / redo ----
+// Modelled on Notion's revision stack (analysis/undo-and-history.md): every edit is recorded
+// with the before/after version of each block it touched; edits of the same kind within
+// 700 ms of the step's start merge into one step; named checkpoints group a whole AI turn.
+
+interface Change {
+  before?: Block
+  after?: Block
+}
+
+interface Revision {
+  changes: Record<string, Change>
+  rootsBefore: string[]
+  rootsAfter: string[]
+  kind: 'text' | 'structure'
+  timestamp: number
+  name?: string
+  undoRedoCount: number
+  /** Block that had the caret when the step started; focused again on undo. */
+  focusId?: string
+}
+
+const MERGE_MS = 700
+const MAX_STEPS = 200
+const undoStack: Revision[] = []
+const redoStack: Revision[] = []
+let checkpoint: string | null = null
+let batch: Revision | null = null
+let batchDepth = 0
+
+/** Every block that differs between two versions of the blocks map. */
+function diffBlocks(prev: Record<string, Block>, next: Record<string, Block>): Record<string, Change> {
+  const changes: Record<string, Change> = {}
+  for (const id in next) if (prev[id] !== next[id]) changes[id] = { before: prev[id], after: next[id] }
+  for (const id in prev) if (!(id in next)) changes[id] = { before: prev[id], after: undefined }
+  return changes
+}
+
+/** "text" = only block text changed (typing); everything else is structural. */
+function kindOf(changes: Record<string, Change>): Revision['kind'] {
+  const textOnly = Object.values(changes).every(
+    ({ before: b, after: a }) =>
+      b && a && b.type === a.type && b.alive === a.alive && b.parent_id === a.parent_id && b.content === a.content &&
+      b.properties.checked === a.properties.checked && JSON.stringify(b.format) === JSON.stringify(a.format),
+  )
+  return textOnly ? 'text' : 'structure'
+}
+
+function focusedBlockId() {
+  return (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-block-id]')?.dataset.blockId
+}
+
+/** True if `cur` is still the version a revision left behind (nobody edited it since). */
+const sameVersion = (cur?: Block, expected?: Block) =>
+  cur === expected || (!!cur && !!expected && cur.last_edited_time === expected.last_edited_time)
+
+function recordHistory(changes: Record<string, Change>, rootsBefore: string[], rootsAfter: string[], name?: string) {
+  if (!Object.keys(changes).length && rootsBefore === rootsAfter) return false
+  const kind = name ? 'structure' : kindOf(changes)
+  const now = Date.now()
+  const last = undoStack.at(-1)
+  let rev: Revision | undefined
+  if (name) rev = undoStack.find((r) => r.name === name)
+  else if (batch) rev = batch
+  else if (last && !last.name && now - last.timestamp <= MERGE_MS && last.undoRedoCount === 0 && last.kind === kind) rev = last
+  if (!rev) {
+    rev = { changes: {}, rootsBefore, rootsAfter, kind, timestamp: now, name, undoRedoCount: 0, focusId: focusedBlockId() }
+    undoStack.push(rev)
+    if (undoStack.length > MAX_STEPS) undoStack.shift()
+  }
+  if (batchDepth > 0 && !name) batch = rev
+  for (const [id, c] of Object.entries(changes)) {
+    const prev = rev.changes[id]
+    rev.changes[id] = { before: prev ? prev.before : c.before, after: c.after }
+  }
+  rev.rootsAfter = rootsAfter
+  redoStack.length = 0
+  return true
 }
 
 const defaultSettings: AISettings = {
@@ -110,6 +211,9 @@ let mode: 'server' | 'local' = 'local'
 let synced: Record<string, Block> = {}
 let syncedRoots: string[] = []
 
+/** The latest upload to the server, so callers can wait for it (see `flushSaves`). */
+let inFlight: Promise<void> = Promise.resolve()
+
 function pushToServer(s: Pick<State, 'blocks' | 'rootPages'>, beacon = false) {
   const changed = Object.values(s.blocks).filter((b) => synced[b.id] !== b)
   const deleted = Object.keys(synced).filter((id) => !(id in s.blocks))
@@ -122,7 +226,7 @@ function pushToServer(s: Pick<State, 'blocks' | 'rootPages'>, beacon = false) {
     navigator.sendBeacon('/api/sync', new Blob([body], { type: 'application/json' }))
     return
   }
-  fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+  inFlight = fetch('/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
     .then((r) => {
       if (!r.ok) throw new Error(String(r.status))
     })
@@ -169,8 +273,59 @@ export const useStore = create<State>((set, get) => {
     const s = get()
     const blocks = { ...s.blocks }
     const extra = fn(blocks, s) || {}
-    set({ blocks, ...extra })
+    const recorded = recordHistory(diffBlocks(s.blocks, blocks), s.rootPages, extra.rootPages ?? s.rootPages)
+    set({ blocks, ...extra, ...(recorded ? { historyTick: s.historyTick + 1 } : {}) })
     persist(get())
+  }
+
+  /** Put back the "before" side of a revision. Returns the opposite revision (for redo / undo). */
+  const revert = (rev: Revision): { inverse: Revision; restored: number; skipped: number } => {
+    const s = get()
+    const blocks = { ...s.blocks }
+    const t = now()
+    const applied: Record<string, Change> = {}
+    let skipped = 0
+    for (const [id, c] of Object.entries(rev.changes)) {
+      const cur = blocks[id]
+      // Changed by someone else since (you after an AI turn, or another tab): keep their version.
+      if (!sameVersion(cur, c.after)) {
+        skipped++
+        continue
+      }
+      if (c.before) blocks[id] = { ...c.before, last_edited_time: t }
+      else delete blocks[id]
+      applied[id] = { before: cur, after: blocks[id] }
+    }
+    // A removed block must not stay listed in a parent we couldn't restore.
+    for (const [id, c] of Object.entries(applied)) {
+      const pid = c.before?.parent_id
+      if (!c.after && pid && blocks[pid]?.content.includes(id)) {
+        blocks[pid] = { ...blocks[pid], content: blocks[pid].content.filter((x) => x !== id), last_edited_time: t }
+      }
+    }
+    // Top-level pages: take back what the step added, put back what it removed.
+    const added = rev.rootsAfter.filter((id) => !rev.rootsBefore.includes(id))
+    const roots = s.rootPages.filter((id) => !added.includes(id))
+    rev.rootsBefore.forEach((id, i) => {
+      if (!roots.includes(id) && !rev.rootsAfter.includes(id)) roots.splice(Math.min(i, roots.length), 0, id)
+    })
+    const rootPages = roots.filter((id) => blocks[id])
+    const cur = s.currentPageId
+    const currentPageId = cur && blocks[cur] ? cur : (cur && s.blocks[cur]?.parent_id) || rootPages.find((id) => blocks[id]?.alive) || null
+    set({ blocks, rootPages, currentPageId, historyTick: s.historyTick + 1 })
+    persist(get())
+    if (rev.focusId && blocks[rev.focusId]?.alive && blocks[rev.focusId].type !== 'page') get().requestFocus({ id: rev.focusId, at: 'end' })
+    const inverse: Revision = {
+      changes: applied,
+      rootsBefore: s.rootPages,
+      rootsAfter: rootPages,
+      kind: rev.kind,
+      timestamp: t,
+      name: rev.name,
+      undoRedoCount: rev.undoRedoCount + 1,
+      focusId: rev.focusId,
+    }
+    return { inverse, restored: Object.keys(applied).length, skipped }
   }
   const touch = (blocks: Record<string, Block>, id: string, patch: Partial<Block>) => {
     blocks[id] = { ...blocks[id], ...patch, last_edited_time: now() }
@@ -240,7 +395,11 @@ export const useStore = create<State>((set, get) => {
       if (!changed && !rootsChanged) return
       syncedRoots = roots
       const currentPageId = s.currentPageId && blocks[s.currentPageId] ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
-      set({ blocks, rootPages: rootsChanged ? roots : s.rootPages, currentPageId })
+      // Changes from elsewhere aren't yours to undo — except during a checkpoint (an AI turn).
+      const recorded = checkpoint
+        ? recordHistory(diffBlocks(s.blocks, blocks), s.rootPages, rootsChanged ? roots : s.rootPages, checkpoint)
+        : false
+      set({ blocks, rootPages: rootsChanged ? roots : s.rootPages, currentPageId, ...(recorded ? { historyTick: s.historyTick + 1 } : {}) })
     },
 
     openPage: (id) => {
@@ -284,8 +443,9 @@ export const useStore = create<State>((set, get) => {
       return db.id
     },
 
-    addRow: (dbId, title = '') => {
+    addRow: (dbId, title = '', cells) => {
       const row = makeBlock('page', dbId, title)
+      if (cells && Object.keys(cells).length) row.properties.cells = { ...cells }
       mutate((blocks) => {
         blocks[row.id] = row
         touch(blocks, dbId, { content: [...blocks[dbId].content, row.id] })
@@ -355,7 +515,12 @@ export const useStore = create<State>((set, get) => {
       }),
 
     // Soft delete, like Notion: pages go to trash, other blocks just disappear.
-    removeBlock: (id) =>
+    removeBlock: (id) => {
+      const b = get().blocks[id]
+      if (b?.type === 'page') {
+        // Like Notion: a 10-second toast that can take it back.
+        set({ toast: { label: `Moved “${pageTitle(b)}” to trash`, action: { label: 'Undo', run: () => get().undo() } } })
+      }
       mutate((blocks, s) => {
         const b = blocks[id]
         touch(blocks, id, { alive: false })
@@ -365,7 +530,8 @@ export const useStore = create<State>((set, get) => {
           }
         }
         detach(blocks, id)
-      }),
+      })
+    },
 
     restorePage: (id) =>
       mutate((blocks, s) => {
@@ -434,6 +600,52 @@ export const useStore = create<State>((set, get) => {
         touch(blocks, id, { parent_id: newParent })
       }),
 
+    historyTick: 0,
+    announcement: '',
+    toast: null,
+
+    undo: () => {
+      const rev = undoStack.pop()
+      if (!rev) return set({ announcement: 'Nothing to undo' })
+      redoStack.push(revert(rev).inverse)
+      set({ announcement: 'Undone' })
+    },
+
+    redo: () => {
+      const rev = redoStack.pop()
+      if (!rev) return set({ announcement: 'Nothing to redo' })
+      undoStack.push(revert(rev).inverse)
+      set({ announcement: 'Redone' })
+    },
+
+    transact: (fn) => {
+      batchDepth++
+      try {
+        fn()
+      } finally {
+        if (--batchDepth === 0) batch = null
+      }
+    },
+
+    beginCheckpoint: (name) => {
+      checkpoint = name
+    },
+    endCheckpoint: (name) => {
+      if (checkpoint === name) checkpoint = null
+    },
+
+    undoNamed: (name) => {
+      const i = undoStack.findIndex((r) => r.name === name)
+      if (i < 0) return null
+      const [rev] = undoStack.splice(i, 1)
+      const { inverse, restored, skipped } = revert(rev)
+      redoStack.push(inverse)
+      set({ announcement: 'Undone' })
+      return { restored, skipped }
+    },
+
+    showToast: (toast) => set({ toast }),
+
     saveSettings: (settings) => {
       set({ settings })
       idbSet(SETTINGS_KEY, settings)
@@ -467,4 +679,19 @@ export function pagePath(blocks: Record<string, Block>, id: string): Block[] {
     if (cur.type === 'page') path.unshift(cur)
   }
   return path
+}
+
+/** Whether a named undo step (e.g. an AI turn) is still on the undo stack. */
+export function hasNamedStep(name: string) {
+  return undoStack.some((r) => r.name === name && Object.keys(r.changes).length > 0)
+}
+
+/** Send any pending edits to the server now and wait for them (e.g. before restoring a version). */
+export async function flushSaves() {
+  writeNow()
+  await inFlight
+}
+
+export function isServerMode() {
+  return mode === 'server'
 }

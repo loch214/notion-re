@@ -5,9 +5,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { dbRows, OPTION_COLORS, PROPERTY_TYPES, shortId } from '../../shared/blocks.ts'
 import { useStore } from '../store'
-import type { Block, CellValue, DbProperty, PropertyType, SelectOption } from '../types'
+import type { Block, CellValue, DbProperty, DbView, PropertyType, SelectOption } from '../types'
 
-const TYPE_ICON: Record<PropertyType, string> = {
+export const TYPE_ICON: Record<PropertyType, string> = {
   title: 'Aa',
   ...Object.fromEntries(PROPERTY_TYPES.map((t) => [t.type, t.icon])),
 } as Record<PropertyType, string>
@@ -15,7 +15,7 @@ const TYPE_ICON: Record<PropertyType, string> = {
 const defaultWidth = (p: DbProperty) => p.width ?? (p.type === 'title' ? 260 : p.type === 'checkbox' ? 90 : 180)
 
 /** Floating panel under an anchor element, closed by clicking outside or Escape. */
-function Popover({ anchor, onClose, children, width = 240 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
+export function Popover({ anchor, onClose, children, width = 240 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -34,26 +34,22 @@ function Popover({ anchor, onClose, children, width = 240 }: { anchor: DOMRect; 
   )
 }
 
-export function DatabaseView({ dbId }: { dbId: string }) {
-  const db = useStore((s) => s.blocks[dbId])
-  const blocks = useStore((s) => s.blocks)
+/** Table layout: rows = the view's (filtered, sorted) rows; columns = the view's visible properties. */
+export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block[]; view: DbView; onNewRow: () => void }) {
+  const dbId = db.id
   const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
   const S = useStore.getState
-  if (!db?.schema) return null
-  const schema = db.schema
-  const rows = dbRows(blocks, db)
+  const allColumns = db.schema!
+  const schema = allColumns.filter((p) => p.type === 'title' || !view.hidden?.includes(p.id))
 
   const addProperty = (rect: DOMRect) => {
-    const prop: DbProperty = { id: shortId(), name: `Property ${schema.length}`, type: 'text' }
-    S().updateBlock(dbId, { schema: [...schema, prop] })
+    const prop: DbProperty = { id: shortId(), name: `Property ${allColumns.length}`, type: 'text' }
+    S().updateBlock(dbId, { schema: [...allColumns, prop] })
     setMenu({ propId: prop.id, rect })
   }
 
   return (
-    <div className="db">
-      <div className="db-views">
-        <span className="db-view-tab active">▦ Table</span>
-      </div>
+    <>
       <div className="db-scroll">
         <table className="db-table">
           <colgroup>
@@ -100,13 +96,13 @@ export function DatabaseView({ dbId }: { dbId: string }) {
           </tbody>
         </table>
       </div>
-      <button className="db-new-row" onClick={() => S().addRow(dbId)}>
+      <button className="db-new-row" onClick={onNewRow}>
         ＋ New
       </button>
-      {menu && schema.some((p) => p.id === menu.propId) && (
+      {menu && allColumns.some((p) => p.id === menu.propId) && (
         <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />
       )}
-    </div>
+    </>
   )
 }
 
@@ -221,7 +217,7 @@ export function Cell({ prop, row, dbId }: { prop: DbProperty; row: Block; dbId: 
   }
 }
 
-function Pill({ option, onRemove }: { option: SelectOption; onRemove?: () => void }) {
+export function Pill({ option, onRemove }: { option: SelectOption; onRemove?: () => void }) {
   return (
     <span className={`db-pill opt-${option.color}`}>
       {option.name}

@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react'
 import { COVER_PRESETS, coverCss } from '../../shared/blocks.ts'
 import { useStore } from '../store'
 import { BlockList } from './Block'
-import { DatabaseView, RowProperties } from './Database'
+import { RowProperties } from './Database'
+import { DatabaseView } from './DatabaseViews'
 
 const ICONS = ['📄', '📝', '📚', '🎯', '💡', '🚀', '📅', '✅', '🧠', '🎨', '💼', '🏠', '🌱', '⭐', '🔥', '🎓']
 const COVERS = Object.keys(COVER_PRESETS)
@@ -18,6 +19,12 @@ export function PageView({ pageId }: { pageId: string }) {
     if (titleRef.current && !page?.properties.title) titleRef.current.focus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageId])
+
+  // Title changed from outside (undo, AI, another tab) while you're not typing in it.
+  useEffect(() => {
+    const el = titleRef.current
+    if (el && document.activeElement !== el && el.textContent !== (page?.properties.title ?? '')) el.textContent = page?.properties.title ?? ''
+  }, [page?.properties.title])
 
   if (!page) return null
   const S = useStore.getState

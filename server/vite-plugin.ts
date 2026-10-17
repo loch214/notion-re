@@ -3,12 +3,17 @@
 //   POST /api/sync       → merge a client's changed blocks
 //   GET  /api/events     → Server-Sent Events: "change" whenever the file changes
 //                          (from any tab, or from Claude via the MCP server)
+//   GET  /api/history?page=ID            → saved versions of a page (newest first)
+//   GET  /api/history/version?page=&id=  → one version's blocks
+//   POST /api/history/restore {page, id} → put the page back to that version
+//   POST /api/history/name {page, id, name} → bookmark (name) a version, or clear the name
 
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Connect, Plugin } from 'vite'
 import { claudeBridge } from './claude-bridge.ts'
+import { getVersion, listVersions, nameVersion, recordWrite, restoreVersion } from './history.ts'
 import { applySync, loadWorkspace, saveWorkspace } from './workspace.ts'
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -18,6 +23,12 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(data))
     req.on('error', reject)
   })
+}
+
+/** Block other websites from writing to the workspace through the user's browser. */
+function crossOrigin(req: IncomingMessage) {
+  const origin = req.headers.origin
+  return !!origin && new URL(origin).host !== req.headers.host
 }
 
 function setup(root: string, middlewares: Connect.Server) {
@@ -44,13 +55,48 @@ function setup(root: string, middlewares: Connect.Server) {
 
   middlewares.use('/api/sync', async (req, res) => {
     if (req.method !== 'POST') return json(res, 405, { error: 'POST only' })
-    // Block other websites from writing to the workspace through the user's browser.
-    const origin = req.headers.origin
-    if (origin && new URL(origin).host !== req.headers.host) return json(res, 403, { error: 'Cross-origin write refused' })
+    if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin write refused' })
     try {
       const payload = JSON.parse(await readBody(req))
-      saveWorkspace(file, applySync(loadWorkspace(file), payload))
+      const before = loadWorkspace(file)
+      const after = applySync(before, payload)
+      saveWorkspace(file, after)
+      recordWrite(file, before, after, [...payload.blocks.map((b: { id: string }) => b.id), ...payload.deleted], 'You')
       json(res, 200, { ok: true })
+    } catch (e: any) {
+      json(res, 400, { error: e.message })
+    }
+  })
+
+  middlewares.use('/api/history', async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    try {
+      if (req.method === 'GET') {
+        const page = url.searchParams.get('page') ?? ''
+        if (url.pathname === '/') return json(res, 200, listVersions(file, page))
+        if (url.pathname === '/version') {
+          const v = getVersion(file, page, url.searchParams.get('id') ?? '')
+          return v ? json(res, 200, v) : json(res, 404, { error: 'Version not found' })
+        }
+        return json(res, 404, { error: 'Not found' })
+      }
+      if (req.method !== 'POST') return json(res, 405, { error: 'GET or POST only' })
+      if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin write refused' })
+      const body = JSON.parse(await readBody(req))
+      if (url.pathname === '/restore') {
+        const before = loadWorkspace(file)
+        if (!before) return json(res, 404, { error: 'No workspace' })
+        const after = structuredClone(before)
+        const changed = restoreVersion(file, after, String(body.page), String(body.id))
+        saveWorkspace(file, after)
+        recordWrite(file, before, after, changed, 'You')
+        return json(res, 200, { ok: true, changed: changed.length })
+      }
+      if (url.pathname === '/name') {
+        nameVersion(file, String(body.page), String(body.id), body.name ?? null)
+        return json(res, 200, { ok: true })
+      }
+      json(res, 404, { error: 'Not found' })
     } catch (e: any) {
       json(res, 400, { error: e.message })
     }

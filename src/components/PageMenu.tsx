@@ -10,7 +10,7 @@ const FONTS: { font: PageFont; label: string }[] = [
   { font: 'mono', label: 'Mono' },
 ]
 
-export function PageMenu({ pageId, onClose }: { pageId: string; onClose: () => void }) {
+export function PageMenu({ pageId, onClose, onHistory }: { pageId: string; onClose: () => void; onHistory: () => void }) {
   const page = useStore((s) => s.blocks[pageId])
   const S = useStore.getState
   if (!page) return null
@@ -77,6 +77,15 @@ export function PageMenu({ pageId, onClose }: { pageId: string; onClose: () => v
           }}
         >
           ⧉ Duplicate page
+        </div>
+        <div
+          className="menu-item"
+          onClick={() => {
+            onClose()
+            onHistory()
+          }}
+        >
+          🕘 Page history
         </div>
       </div>
     </>

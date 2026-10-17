@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { activeModel, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
-import { pageTitle, useStore } from '../store'
+import { hasNamedStep, pageTitle, useStore } from '../store'
 import { Markdown } from './Markdown'
 
 const QUICK = ['Summarize this page', 'List the action items', 'Suggest improvements to this page', 'Explain this page simply']
 const AGENT_QUICK = ['Summarize this page', 'Turn this page into a checklist', 'Add a weekly study plan to this page', 'Create a page for my project ideas']
 
-type PanelMessage = ChatMessage & { tools?: string[] }
+type PanelMessage = ChatMessage & {
+  tools?: string[]
+  /** Name of the undo step holding every change Claude made in this reply. */
+  undoName?: string
+  undoResult?: { restored: number; skipped: number }
+}
+
+/** Changes reach the app over the live-sync channel shortly after a tool runs; keep listening a bit. */
+const CHECKPOINT_GRACE_MS = 2000
 
 export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettings: () => void }) {
   const settings = useStore((s) => s.settings)
@@ -21,6 +29,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   const endRef = useRef<HTMLDivElement>(null)
   const sessionId = useRef<string | undefined>(undefined)
   const agent = settings.provider === 'claude-code'
+  useStore((s) => s.historyTick) // re-render when undo steps change
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
@@ -40,11 +49,14 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
     setInput('')
     setError('')
     const history: PanelMessage[] = [...messages, { role: 'user', content: text }]
-    setMessages([...history, { role: 'assistant', content: '' }])
+    // Like Notion AI's per-turn undo: everything Claude changes in this reply is one named undo step.
+    const undoName = agent ? `ai-turn-${Date.now()}` : undefined
+    setMessages([...history, { role: 'assistant', content: '', undoName }])
     setBusy(true)
     abort.current = new AbortController()
 
-    if (agent) {
+    if (agent && undoName) {
+      useStore.getState().beginCheckpoint(undoName)
       // Your own Claude, with tools to read and edit the workspace directly.
       try {
         sessionId.current = await claudeChat(
@@ -70,6 +82,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
         }
       } finally {
         setBusy(false)
+        setTimeout(() => useStore.getState().endCheckpoint(undoName), CHECKPOINT_GRACE_MS)
       }
       return
     }
@@ -100,12 +113,14 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
 
   const insertIntoPage = (text: string) => {
     if (!pageId) return
-    const { insertBlock, updateBlock, requestFocus } = useStore.getState()
+    const { insertBlock, updateBlock, requestFocus, transact } = useStore.getState()
     let last = ''
-    for (const spec of markdownToBlocks(text)) {
-      last = insertBlock({ parent: pageId, type: spec.type, title: spec.title })
-      if (spec.checked) updateBlock(last, { properties: { checked: true } })
-    }
+    transact(() => {
+      for (const spec of markdownToBlocks(text)) {
+        last = insertBlock({ parent: pageId, type: spec.type, title: spec.title })
+        if (spec.checked) updateBlock(last, { properties: { checked: true } })
+      }
+    })
     if (last) requestFocus({ id: last, at: 'end' })
   }
 
@@ -149,6 +164,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                       </div>
                     ))}
                     {m.content ? <Markdown text={m.content} /> : !m.tools?.length && <span className="pulse">✨ Thinking…</span>}
+                    {m.undoName && !(busy && i === messages.length - 1) && <TurnUndo message={m} onDone={(r) => setMessages((ms) => ms.map((x) => (x === m ? { ...x, undoResult: r } : x)))} />}
                     {m.content && !agent && !(busy && i === messages.length - 1) && (
                       <div className="msg-actions">
                         <button className="btn small" onClick={() => insertIntoPage(m.content)}>Insert into page</button>
@@ -192,5 +208,32 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
         </>
       )}
     </aside>
+  )
+}
+
+/** "Undo changes" under a Claude reply that edited the workspace. */
+function TurnUndo({ message, onDone }: { message: PanelMessage; onDone: (r: { restored: number; skipped: number }) => void }) {
+  const r = message.undoResult
+  if (r) {
+    return (
+      <div className="ai-undo">
+        ↶ Changes undone{r.skipped ? ` · ${r.skipped} block${r.skipped > 1 ? 's' : ''} you edited afterwards ${r.skipped > 1 ? 'were' : 'was'} kept` : ''}
+      </div>
+    )
+  }
+  if (!hasNamedStep(message.undoName!)) return null
+  return (
+    <div className="ai-undo">
+      <button
+        className="btn small"
+        title="Put back everything Claude changed in this reply"
+        onClick={() => {
+          const res = useStore.getState().undoNamed(message.undoName!)
+          if (res) onDone(res)
+        }}
+      >
+        ↶ Undo changes
+      </button>
+    </div>
   )
 }

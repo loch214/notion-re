@@ -355,8 +355,9 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       suppressContentEditableWarning
       spellCheck={!isCode}
       data-placeholder={PLACEHOLDER[block.type] ?? "Type '/' for commands, or space for AI…"}
-      onInput={onInput}
-      onKeyDown={onKeyDown}
+      // One key press / input = at most one undo step, even when it does several edits.
+      onInput={() => S().transact(onInput)}
+      onKeyDown={(e) => S().transact(() => onKeyDown(e))}
       onPaste={onPaste}
       onBlur={() => setTimeout(() => setSlash(null), 150)}
     />
@@ -466,7 +467,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
           items={filterMenu(slash.query)}
           active={slash.active}
           anchor={slash.rect}
-          onPick={pick}
+          onPick={(item) => S().transact(() => pick(item))}
           onHover={(i) => setSlash({ ...slash, active: i })}
         />
       )}

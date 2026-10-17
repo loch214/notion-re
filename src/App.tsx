@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AIPanel } from './components/AIPanel'
 import { SearchModal, SettingsModal, TrashModal } from './components/Modals'
+import { HistoryModal } from './components/HistoryModal'
 import { PageMenu } from './components/PageMenu'
 import { PageView } from './components/PageView'
 import { Sidebar } from './components/Sidebar'
@@ -16,6 +17,8 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const announcement = useStore((s) => s.announcement)
 
   useEffect(() => {
     useStore.getState().load()
@@ -24,6 +27,15 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      // Undo / redo for the workspace. Text boxes (AI prompt, database cells) keep their own.
+      const inTextBox = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+      if (mod && !e.altKey && !inTextBox && (key === 'z' || key === 'y')) {
+        e.preventDefault()
+        if (key === 'y' || e.shiftKey) useStore.getState().redo()
+        else useStore.getState().undo()
+        return
+      }
       if (mod && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setModal('search')
@@ -91,10 +103,41 @@ export default function App() {
       </main>
       {aiOpen && <AIPanel onClose={() => setAiOpen(false)} onSettings={() => setModal('settings')} />}
 
-      {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} />}
+      {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} onHistory={() => setHistoryOpen(true)} />}
+      {historyOpen && page && <HistoryModal pageId={page.id} onClose={() => setHistoryOpen(false)} />}
+      <Toast />
+      <div className="sr-only" aria-live="polite">{announcement}</div>
       {modal === 'search' && <SearchModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
       {modal === 'trash' && <TrashModal onClose={() => setModal(null)} />}
+    </div>
+  )
+}
+
+/** Bottom toast with an optional action (e.g. "Moved to trash · Undo"); hides after 10 s like Notion's. */
+function Toast() {
+  const toast = useStore((s) => s.toast)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => useStore.getState().showToast(null), 10_000)
+    return () => clearTimeout(t)
+  }, [toast])
+  if (!toast) return null
+  return (
+    <div className="toast" role="status">
+      <span>{toast.label}</span>
+      {toast.action && (
+        <button
+          className="toast-action"
+          onClick={() => {
+            toast.action!.run()
+            useStore.getState().showToast(null)
+          }}
+        >
+          {toast.action.label}
+        </button>
+      )}
+      <button className="ctl" title="Dismiss" onClick={() => useStore.getState().showToast(null)}>✕</button>
     </div>
   )
 }

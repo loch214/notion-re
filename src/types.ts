@@ -43,6 +43,8 @@ export interface Block {
   }
   /** Present on a page that is a database: its columns, in display order. Rows are its child pages. */
   schema?: DbProperty[]
+  /** Database only: saved views (tabs). Missing = a single default table view. */
+  views?: DbView[]
   alive: boolean
   created_time: number
   last_edited_time: number
@@ -70,6 +72,55 @@ export interface DbProperty {
   /** select / multi_select only. */
   options?: SelectOption[]
   width?: number
+}
+
+export type ViewType = 'table' | 'board' | 'list' | 'gallery' | 'calendar'
+
+export type FilterOperator =
+  | 'string_is'
+  | 'string_contains'
+  | 'string_starts_with'
+  | 'number_equals'
+  | 'number_greater_than'
+  | 'number_less_than'
+  | 'number_greater_than_or_equal_to'
+  | 'number_less_than_or_equal_to'
+  | 'enum_is'
+  | 'enum_is_not'
+  | 'enum_contains'
+  | 'enum_does_not_contain'
+  | 'checkbox_is'
+  | 'date_is'
+  | 'date_is_on_or_before'
+  | 'date_is_on_or_after'
+  | 'is_empty'
+  | 'is_not_empty'
+
+export interface DbFilter {
+  property: string
+  operator: FilterOperator
+  value?: CellValue
+}
+
+export interface DbSort {
+  property: string
+  direction: 'ascending' | 'descending'
+}
+
+export interface DbView {
+  id: string
+  name: string
+  type: ViewType
+  sort: DbSort[]
+  filter: { operator: 'and' | 'or'; filters: DbFilter[] }
+  /** Property ids hidden in this view (the title is always shown). */
+  hidden?: string[]
+  /** Board: the select property whose options become columns. */
+  group_by?: string
+  /** Calendar: the date property that places rows on days. */
+  calendar_by?: string
+  /** Gallery: what the top of each card shows. */
+  cover?: 'none' | 'page_cover' | 'page_content'
 }
 
 /**

@@ -1,11 +1,67 @@
 // Pure block helpers shared by the web app and the Node side (sync server, MCP).
 // No DOM APIs in here.
 
-import type { Block, BlockType, DbProperty, OptionColor, PropertyType } from '../src/types'
+import type { Block, BlockColor, BlockType, ColorName, DbProperty, OptionColor, PropertyType } from '../src/types'
 
 export interface Workspace {
   blocks: Record<string, Block>
   rootPages: string[]
+}
+
+// ---- styling ----
+
+export const COLOR_NAMES: ColorName[] = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red']
+
+export const BLOCK_COLORS: BlockColor[] = [...COLOR_NAMES, ...COLOR_NAMES.map((c) => `${c}_background` as const)]
+
+export const COVER_PRESETS: Record<string, string> = {
+  sunset: 'linear-gradient(120deg, #f6d365 0%, #fda085 100%)',
+  mint: 'linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%)',
+  sky: 'linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%)',
+  lime: 'linear-gradient(120deg, #d4fc79 0%, #96e6a1 100%)',
+  candy: 'linear-gradient(120deg, #fbc2eb 0%, #a6c1ee 100%)',
+  ocean: 'linear-gradient(120deg, #30cfd0 0%, #330867 100%)',
+  night: 'linear-gradient(120deg, #434343 0%, #000000 100%)',
+}
+
+/**
+ * Turn a stored cover into a safe CSS `background` value (or undefined if it isn't one we allow).
+ * Accepts a preset name, a hex / rgb() colour, a linear/radial gradient, or an https image URL.
+ */
+export function coverCss(cover: string | undefined): string | undefined {
+  if (!cover) return undefined
+  const c = cover.trim()
+  if (COVER_PRESETS[c.toLowerCase()]) return COVER_PRESETS[c.toLowerCase()]
+  if (/^https:\/\/[^\s"'()\\]+$/i.test(c)) return `center / cover no-repeat url("${c}")`
+  if (/^#[0-9a-f]{3,8}$/i.test(c)) return c
+  if (/^(linear|radial)-gradient\([#\w\s,.%()-]+\)$/i.test(c) || /^rgba?\([\d\s,.%]+\)$/i.test(c)) return c
+  return undefined
+}
+
+/** Short description of a page's look, for the AI. Empty when nothing is set. */
+export function pageStyleSummary(page: Block): string {
+  const f = page.format
+  const presetName = Object.entries(COVER_PRESETS).find(([, v]) => v === f.cover)?.[0]
+  const parts = [
+    f.cover && `cover: ${presetName ?? f.cover}`,
+    f.background && `background: ${f.background}`,
+    f.page_font && f.page_font !== 'default' && `font: ${f.page_font}`,
+    f.full_width && 'full width',
+  ].filter(Boolean)
+  return parts.join(', ')
+}
+
+/**
+ * Deep-copy a block and everything inside it under `parentId` (database rows and schema included).
+ * Mutates `blocks`; returns the new id. The caller links the copy into its parent.
+ */
+export function duplicateTree(blocks: Record<string, Block>, id: string, parentId: string | null): string {
+  const src = blocks[id]
+  const t = Date.now()
+  const copy: Block = structuredClone({ ...src, id: crypto.randomUUID(), parent_id: parentId, created_time: t, last_edited_time: t })
+  blocks[copy.id] = copy
+  copy.content = src.content.filter((c) => blocks[c]?.alive).map((c) => duplicateTree(blocks, c, copy.id))
+  return copy.id
 }
 
 // ---- databases ----
@@ -163,6 +219,8 @@ export function pageToMarkdown(blocks: Record<string, Block>, pageId: string, wi
   const page = blocks[pageId]
   if (!page) return ''
   out.push(`# ${page.format.icon ? page.format.icon + ' ' : ''}${page.properties.title || 'Untitled'}`, '')
+  const style = withIds && pageStyleSummary(page)
+  if (style) out.push(`(page style: ${style})`, '')
   if (page.schema) {
     out.push('(This page is a database. Each row is a page.)', '', ...databaseToMarkdown(blocks, page, withIds))
     return out.join('\n')
@@ -179,7 +237,8 @@ export function pageToMarkdown(blocks: Record<string, Block>, pageId: string, wi
       const b = blocks[cid]
       if (!b?.alive) continue
       const pad = '  '.repeat(depth)
-      const tag = withIds ? `[${b.id}] ` : ''
+      // With ids, a coloured block shows as [id|color].
+      const tag = withIds ? `[${b.id}${b.format.color ? `|${b.format.color}` : ''}] ` : ''
       const t = b.type === 'code' || b.type === 'page' ? b.properties.title : htmlToInlineMarkdown(b.properties.title)
       n = b.type === 'numbered_list' ? n + 1 : 0
       switch (b.type) {

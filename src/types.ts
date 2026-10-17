@@ -30,8 +30,16 @@ export interface Block {
   }
   format: {
     icon?: string
+    /** Preset name, colour, CSS gradient or https image URL — rendered through `coverCss()`. */
     cover?: string
     collapsed?: boolean
+    /** Text colour (`red`) or background colour (`red_background`) of a block. */
+    color?: BlockColor
+    /** Pages only. */
+    page_font?: PageFont
+    full_width?: boolean
+    /** Pages only: soft tint behind the whole page. */
+    background?: ColorName
   }
   /** Present on a page that is a database: its columns, in display order. Rows are its child pages. */
   schema?: DbProperty[]
@@ -43,6 +51,10 @@ export interface Block {
 export type PropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'date' | 'checkbox' | 'url'
 
 export type OptionColor = 'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
+
+export type ColorName = Exclude<OptionColor, 'default'>
+export type BlockColor = ColorName | `${ColorName}_background`
+export type PageFont = 'default' | 'serif' | 'mono'
 
 export interface SelectOption {
   id: string

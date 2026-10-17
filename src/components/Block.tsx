@@ -10,8 +10,9 @@ import {
   splitAtCaret,
 } from '../caret'
 import { htmlToText, inlineMarkdownToHtml, markdownToBlocks, sanitizeHtml } from '../markdown'
+import { COLOR_NAMES } from '../../shared/blocks.ts'
 import { pageTitle, useStore, visibleOrder } from '../store'
-import type { Block, BlockType } from '../types'
+import type { Block, BlockColor, BlockType } from '../types'
 import { AIInline } from './AIInline'
 import { filterMenu, MENU_ITEMS, SlashMenu, type MenuItem } from './SlashMenu'
 
@@ -411,7 +412,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
 
   return (
     <div
-      className={`block-row type-${block.type} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''}`}
+      className={`block-row type-${block.type} ${block.format.color ? `color-${block.format.color}` : ''} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''}`}
       data-block-id={id}
       onDragOver={onDragOver}
       onDragLeave={() => setDropPos(null)}
@@ -493,6 +494,11 @@ function BlockMenu({ id, onClose }: { id: string; onClose: () => void }) {
   const S = useStore.getState
   const isPage = S().blocks[id]?.type === 'page'
   const turnInto = isPage ? [] : MENU_ITEMS.filter((i) => i.key !== 'ai' && i.key !== 'page' && i.key !== 'database')
+  const color = S().blocks[id]?.format.color
+  const setColor = (c: BlockColor | undefined) => {
+    S().updateBlock(id, { format: { color: c } })
+    onClose()
+  }
   return (
     <>
       <div className="backdrop" onClick={onClose} />
@@ -506,17 +512,29 @@ function BlockMenu({ id, onClose }: { id: string; onClose: () => void }) {
         >
           🗑 Delete
         </div>
-        {!isPage && <div
+        <div
           className="menu-item"
           onClick={() => {
-            const b = S().blocks[id]
-            const copy = S().insertBlock({ after: id, type: b.type, title: b.properties.title })
-            S().updateBlock(copy, { properties: { checked: b.properties.checked }, format: { ...b.format } })
+            S().duplicate(id)
             onClose()
           }}
         >
           ⧉ Duplicate
-        </div>}
+        </div>
+        <div className="menu-section">Colour</div>
+        <div className="menu-item" onClick={() => setColor(undefined)}>
+          <span className="color-swatch">A</span> Default
+        </div>
+        {COLOR_NAMES.map((c) => (
+          <div key={c} className={`menu-item ${color === c ? 'active' : ''}`} onClick={() => setColor(c)}>
+            <span className="color-swatch" style={{ color: `var(--c-${c})` }}>A</span> {c[0].toUpperCase() + c.slice(1)} text
+          </div>
+        ))}
+        {COLOR_NAMES.map((c) => (
+          <div key={c} className={`menu-item ${color === `${c}_background` ? 'active' : ''}`} onClick={() => setColor(`${c}_background`)}>
+            <span className="color-swatch" style={{ background: `var(--bg-${c})` }}>A</span> {c[0].toUpperCase() + c.slice(1)} background
+          </div>
+        ))}
         {!isPage && <div className="menu-section">Turn into</div>}
         {turnInto.map((i) => (
           <div

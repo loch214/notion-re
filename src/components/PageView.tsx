@@ -1,18 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { COVER_PRESETS, coverCss } from '../../shared/blocks.ts'
 import { useStore } from '../store'
 import { BlockList } from './Block'
 import { DatabaseView, RowProperties } from './Database'
 
 const ICONS = ['📄', '📝', '📚', '🎯', '💡', '🚀', '📅', '✅', '🧠', '🎨', '💼', '🏠', '🌱', '⭐', '🔥', '🎓']
-const COVERS = [
-  'linear-gradient(120deg, #f6d365 0%, #fda085 100%)',
-  'linear-gradient(120deg, #84fab0 0%, #8fd3f4 100%)',
-  'linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%)',
-  'linear-gradient(120deg, #d4fc79 0%, #96e6a1 100%)',
-  'linear-gradient(120deg, #fbc2eb 0%, #a6c1ee 100%)',
-  'linear-gradient(120deg, #30cfd0 0%, #330867 100%)',
-  'linear-gradient(120deg, #434343 0%, #000000 100%)',
-]
+const COVERS = Object.keys(COVER_PRESETS)
 
 export function PageView({ pageId }: { pageId: string }) {
   const page = useStore((s) => s.blocks[pageId])
@@ -30,6 +23,8 @@ export function PageView({ pageId }: { pageId: string }) {
   const S = useStore.getState
   const alive = page.content.filter((c) => S().blocks[c]?.alive)
   const isDb = !!page.schema
+  const cover = coverCss(page.format.cover)
+  const f = page.format
 
   const addBlockAtEnd = () => {
     const last = alive[alive.length - 1]
@@ -44,14 +39,16 @@ export function PageView({ pageId }: { pageId: string }) {
   }
 
   return (
-    <div className="page">
-      {page.format.cover && (
-        <div className="cover" style={{ background: page.format.cover }}>
+    <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''}`}>
+      {cover && (
+        <div className="cover" style={{ background: cover }}>
           <div className="cover-actions">
             <button
               className="btn small"
               onClick={() => {
-                const i = COVERS.indexOf(page.format.cover!)
+                // Older pages stored the gradient itself rather than the preset name.
+                const name = COVERS.find((k) => k === page.format.cover || COVER_PRESETS[k] === page.format.cover)
+                const i = name ? COVERS.indexOf(name) : -1
                 S().updateBlock(pageId, { format: { cover: COVERS[(i + 1) % COVERS.length] } })
               }}
             >
@@ -63,7 +60,7 @@ export function PageView({ pageId }: { pageId: string }) {
           </div>
         </div>
       )}
-      <div className={`page-inner ${page.format.cover ? 'has-cover' : ''} ${isDb ? 'is-db' : ''}`}>
+      <div className={`page-inner ${cover ? 'has-cover' : ''} ${isDb ? 'is-db' : ''} ${f.full_width ? 'full-width' : ''}`}>
         {page.format.icon && (
           <button
             className="page-icon"
@@ -86,7 +83,7 @@ export function PageView({ pageId }: { pageId: string }) {
               ☺ Add icon
             </button>
           )}
-          {!page.format.cover && (
+          {!cover && (
             <button className="btn-ghost" onClick={() => S().updateBlock(pageId, { format: { cover: COVERS[Math.floor(Math.random() * COVERS.length)] } })}>
               🖼 Add cover
             </button>

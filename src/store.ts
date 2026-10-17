@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { get as idbGet, set as idbSet } from 'idb-keyval'
-import { defaultSchema, makeBlock, type Workspace } from '../shared/blocks.ts'
+import { defaultSchema, duplicateTree, makeBlock, type Workspace } from '../shared/blocks.ts'
 import type { AISettings, Block, BlockType, CellValue } from './types'
 
 const DB_KEY = 'notion-re:workspace'
@@ -56,6 +56,8 @@ interface State {
   createDatabase: (opts: { parent: string | null; after?: string }) => string
   addRow: (dbId: string, title?: string) => string
   setCell: (rowId: string, propId: string, value: CellValue) => void
+  /** Copy a block or page (with everything inside it) right after the original. */
+  duplicate: (id: string) => string
   insertBlock: (opts: { after?: string; parent?: string; index?: number; type?: BlockType; title?: string }) => string
   updateBlock: (id: string, patch: Partial<Omit<Block, 'properties' | 'format'>> & { properties?: Partial<Block['properties']>; format?: Partial<Block['format']> }) => void
   setType: (id: string, type: BlockType) => void
@@ -298,6 +300,23 @@ export const useStore = create<State>((set, get) => {
         const cells = { ...b.properties.cells, [propId]: value }
         touch(blocks, rowId, { properties: { ...b.properties, cells } })
       }),
+
+    duplicate: (id) => {
+      let copyId = ''
+      mutate((blocks, s) => {
+        const parentId = blocks[id].parent_id
+        copyId = duplicateTree(blocks, id, parentId)
+        if (!parentId) {
+          const roots = [...s.rootPages]
+          roots.splice(roots.indexOf(id) + 1, 0, copyId)
+          return { rootPages: roots }
+        }
+        const content = [...blocks[parentId].content]
+        content.splice(content.indexOf(id) + 1, 0, copyId)
+        touch(blocks, parentId, { content })
+      })
+      return copyId
+    },
 
     insertBlock: ({ after, parent, index, type = 'text', title = '' }) => {
       const s = get()

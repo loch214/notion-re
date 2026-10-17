@@ -1,11 +1,66 @@
 // Pure block helpers shared by the web app and the Node side (sync server, MCP).
 // No DOM APIs in here.
 
-import type { Block, BlockType } from '../src/types'
+import type { Block, BlockType, DbProperty, OptionColor, PropertyType } from '../src/types'
 
 export interface Workspace {
   blocks: Record<string, Block>
   rootPages: string[]
+}
+
+// ---- databases ----
+
+export const OPTION_COLORS: OptionColor[] = ['default', 'gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red']
+
+export const PROPERTY_TYPES: { type: PropertyType; label: string; icon: string }[] = [
+  { type: 'text', label: 'Text', icon: '≡' },
+  { type: 'number', label: 'Number', icon: '#' },
+  { type: 'select', label: 'Select', icon: '⊙' },
+  { type: 'multi_select', label: 'Multi-select', icon: '☰' },
+  { type: 'date', label: 'Date', icon: '📅' },
+  { type: 'checkbox', label: 'Checkbox', icon: '☑' },
+  { type: 'url', label: 'URL', icon: '🔗' },
+]
+
+export const shortId = () => crypto.randomUUID().slice(0, 8)
+
+/** A new database starts like Notion's: a Name (title) column and a Tags column. */
+export function defaultSchema(): DbProperty[] {
+  return [
+    { id: 'title', name: 'Name', type: 'title' },
+    { id: shortId(), name: 'Tags', type: 'multi_select', options: [] },
+  ]
+}
+
+/** Plain-text form of a row's cell (used for Markdown, search, and sorting). */
+export function cellText(prop: DbProperty, row: Block): string {
+  if (prop.type === 'title') return row.properties.title
+  const v = row.properties.cells?.[prop.id]
+  if (v === undefined || v === null || v === '') return ''
+  const optName = (id: string) => prop.options?.find((o) => o.id === id)?.name ?? ''
+  switch (prop.type) {
+    case 'checkbox': return v ? 'Yes' : 'No'
+    case 'select': return optName(String(v))
+    case 'multi_select': return (Array.isArray(v) ? v : []).map(optName).filter(Boolean).join(', ')
+    default: return String(v)
+  }
+}
+
+/** Live rows of a database, in order. */
+export function dbRows(blocks: Record<string, Block>, db: Block): Block[] {
+  return db.content.map((id) => blocks[id]).filter((b) => b?.alive && b.type === 'page')
+}
+
+function databaseToMarkdown(blocks: Record<string, Block>, db: Block, withIds: boolean): string[] {
+  const schema = db.schema ?? []
+  const esc = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+  const head = [...(withIds ? ['row id'] : []), ...schema.map((p) => `${p.name} (${p.type})`)]
+  const lines = [`| ${head.map(esc).join(' | ')} |`, `|${head.map(() => ' --- |').join('')}`]
+  for (const row of dbRows(blocks, db)) {
+    const cells = [...(withIds ? [row.id] : []), ...schema.map((p) => cellText(p, row))]
+    lines.push(`| ${cells.map(esc).join(' | ')} |`)
+  }
+  return lines
 }
 
 export function makeBlock(type: BlockType, parent_id: string | null, title = ''): Block {
@@ -108,6 +163,16 @@ export function pageToMarkdown(blocks: Record<string, Block>, pageId: string, wi
   const page = blocks[pageId]
   if (!page) return ''
   out.push(`# ${page.format.icon ? page.format.icon + ' ' : ''}${page.properties.title || 'Untitled'}`, '')
+  if (page.schema) {
+    out.push('(This page is a database. Each row is a page.)', '', ...databaseToMarkdown(blocks, page, withIds))
+    return out.join('\n')
+  }
+  const parent = page.parent_id ? blocks[page.parent_id] : undefined
+  if (parent?.schema) {
+    // A database row: list its properties first.
+    for (const p of parent.schema) if (p.type !== 'title') out.push(`- ${p.name}: ${cellText(p, page) || '(empty)'}`)
+    out.push('')
+  }
   const walk = (id: string, depth: number) => {
     let n = 0
     for (const cid of blocks[id]?.content ?? []) {
@@ -129,7 +194,7 @@ export function pageToMarkdown(blocks: Record<string, Block>, pageId: string, wi
         case 'callout': out.push(`${pad}${tag}> ${b.format.icon ?? '💡'} ${t}`); break
         case 'divider': out.push(`${tag}---`); break
         case 'code': out.push(`${tag}\`\`\``, t, '```'); break
-        case 'page': out.push(`${pad}${tag}[Sub-page: ${t || 'Untitled'}]`); break
+        case 'page': out.push(`${pad}${tag}[${b.schema ? 'Database' : 'Sub-page'}: ${t || 'Untitled'}]`); break
         default: out.push(`${pad}${tag}${t}`)
       }
       if (b.type !== 'page') walk(cid, depth + 1)

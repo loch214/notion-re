@@ -157,10 +157,15 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
     if (slash) deleteTextRange(el, slash.start, slash.start + 1 + slash.query.length)
     setSlash(null)
     save()
-    const { blocks, setType, insertBlock, requestFocus, removeBlock, openPage } = S()
+    const { blocks, setType, insertBlock, requestFocus, removeBlock, openPage, createDatabase } = S()
     const empty = !blocks[id].properties.title
 
     if (item.key === 'ai') return setAiOpen(true)
+    if (item.key === 'database') {
+      createDatabase({ parent: blocks[id].parent_id!, after: id })
+      if (empty && block.type === 'text') removeBlock(id)
+      return
+    }
     if (item.key === 'page') {
       const pid = insertBlock({ after: id, type: 'page' })
       if (empty && block.type === 'text') removeBlock(id)
@@ -487,7 +492,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
 function BlockMenu({ id, onClose }: { id: string; onClose: () => void }) {
   const S = useStore.getState
   const isPage = S().blocks[id]?.type === 'page'
-  const turnInto = isPage ? [] : MENU_ITEMS.filter((i) => i.key !== 'ai' && i.key !== 'page')
+  const turnInto = isPage ? [] : MENU_ITEMS.filter((i) => i.key !== 'ai' && i.key !== 'page' && i.key !== 'database')
   return (
     <>
       <div className="backdrop" onClick={onClose} />

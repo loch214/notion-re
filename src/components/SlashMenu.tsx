@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { BlockType } from '../types'
 
 export interface MenuItem {
-  key: BlockType | 'ai'
+  key: BlockType | 'ai' | 'database'
   label: string
   hint: string
   icon: string
@@ -13,6 +13,7 @@ export const MENU_ITEMS: MenuItem[] = [
   { key: 'ai', label: 'Ask AI', hint: 'Write or brainstorm with your AI', icon: '✨', aliases: ['ai', 'write', 'generate'] },
   { key: 'text', label: 'Text', hint: 'Just start writing with plain text', icon: 'Aa', aliases: ['paragraph', 'plain'] },
   { key: 'page', label: 'Page', hint: 'Embed a sub-page inside this page', icon: '📄', aliases: ['subpage', 'doc'] },
+  { key: 'database', label: 'Database', hint: 'Table of pages with properties', icon: '▦', aliases: ['table', 'db', 'collection'] },
   { key: 'header', label: 'Heading 1', hint: 'Big section heading', icon: 'H1', aliases: ['h1', 'title'] },
   { key: 'sub_header', label: 'Heading 2', hint: 'Medium section heading', icon: 'H2', aliases: ['h2', 'subtitle'] },
   { key: 'sub_sub_header', label: 'Heading 3', hint: 'Small section heading', icon: 'H3', aliases: ['h3'] },

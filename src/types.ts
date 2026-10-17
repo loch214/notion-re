@@ -25,16 +25,46 @@ export interface Block {
     /** Sanitized inline HTML (b, i, u, s, code, a, br). Plain text for pages and code. */
     title: string
     checked?: boolean
+    /** Database rows only: cell values keyed by property id (the title column is `title` above). */
+    cells?: Record<string, CellValue>
   }
   format: {
     icon?: string
     cover?: string
     collapsed?: boolean
   }
+  /** Present on a page that is a database: its columns, in display order. Rows are its child pages. */
+  schema?: DbProperty[]
   alive: boolean
   created_time: number
   last_edited_time: number
 }
+
+export type PropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'date' | 'checkbox' | 'url'
+
+export type OptionColor = 'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
+
+export interface SelectOption {
+  id: string
+  name: string
+  color: OptionColor
+}
+
+export interface DbProperty {
+  /** Stable id; the title column is always `title`. */
+  id: string
+  name: string
+  type: PropertyType
+  /** select / multi_select only. */
+  options?: SelectOption[]
+  width?: number
+}
+
+/**
+ * text/url: string · number: number · checkbox: boolean · date: 'YYYY-MM-DD'
+ * select: option id · multi_select: option ids
+ */
+export type CellValue = string | number | boolean | string[] | null
 
 export type AIProvider = 'claude-code' | 'anthropic' | 'openai' | 'gemini' | 'openai-compatible'
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { get as idbGet, set as idbSet } from 'idb-keyval'
-import { makeBlock, type Workspace } from '../shared/blocks.ts'
-import type { AISettings, Block, BlockType } from './types'
+import { defaultSchema, makeBlock, type Workspace } from '../shared/blocks.ts'
+import type { AISettings, Block, BlockType, CellValue } from './types'
 
 const DB_KEY = 'notion-re:workspace'
 const SETTINGS_KEY = 'notion-re:ai-settings'
@@ -52,6 +52,10 @@ interface State {
   requestFocus: (f: FocusRequest | null) => void
 
   createPage: (parentId: string | null, title?: string) => string
+  /** New full-page database, at the top level or inside `parent` (after block `after`). Opens it. */
+  createDatabase: (opts: { parent: string | null; after?: string }) => string
+  addRow: (dbId: string, title?: string) => string
+  setCell: (rowId: string, propId: string, value: CellValue) => void
   insertBlock: (opts: { after?: string; parent?: string; index?: number; type?: BlockType; title?: string }) => string
   updateBlock: (id: string, patch: Partial<Omit<Block, 'properties' | 'format'>> & { properties?: Partial<Block['properties']>; format?: Partial<Block['format']> }) => void
   setType: (id: string, type: BlockType) => void
@@ -255,6 +259,45 @@ export const useStore = create<State>((set, get) => {
       })
       return page.id
     },
+
+    createDatabase: ({ parent, after }) => {
+      const db = makeBlock('page', parent, '')
+      db.format.icon = '🗂️'
+      db.schema = defaultSchema()
+      mutate((blocks, s) => {
+        blocks[db.id] = db
+        // Start with a few empty rows, like Notion.
+        for (let i = 0; i < 3; i++) {
+          const row = makeBlock('page', db.id)
+          blocks[row.id] = row
+          db.content.push(row.id)
+        }
+        if (!parent) return { rootPages: [...s.rootPages, db.id], currentPageId: db.id }
+        const content = [...blocks[parent].content]
+        const at = after ? content.indexOf(after) + 1 : content.length
+        content.splice(at, 0, db.id)
+        touch(blocks, parent, { content })
+        return { currentPageId: db.id }
+      })
+      return db.id
+    },
+
+    addRow: (dbId, title = '') => {
+      const row = makeBlock('page', dbId, title)
+      mutate((blocks) => {
+        blocks[row.id] = row
+        touch(blocks, dbId, { content: [...blocks[dbId].content, row.id] })
+      })
+      return row.id
+    },
+
+    setCell: (rowId, propId, value) =>
+      mutate((blocks) => {
+        const b = blocks[rowId]
+        if (!b) return
+        const cells = { ...b.properties.cells, [propId]: value }
+        touch(blocks, rowId, { properties: { ...b.properties, cells } })
+      }),
 
     insertBlock: ({ after, parent, index, type = 'text', title = '' }) => {
       const s = get()

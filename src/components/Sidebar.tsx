@@ -44,6 +44,9 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
         <button className="side-item muted" onClick={() => createPage(null)}>
           <span className="side-ic">＋</span> New page
         </button>
+        <button className="side-item muted" onClick={() => useStore.getState().createDatabase({ parent: null })}>
+          <span className="side-ic">▦</span> New database
+        </button>
       </div>
 
       <div className="side-bottom">
@@ -62,7 +65,8 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
   const [open, setOpen] = useState(false)
   const S = useStore.getState
 
-  const childPages = page.content.filter((c) => blocks[c]?.alive && blocks[c].type === 'page')
+  // A database's child pages are its rows; like Notion, they don't appear in the tree.
+  const childPages = page.schema ? [] : page.content.filter((c) => blocks[c]?.alive && blocks[c].type === 'page')
 
   return (
     <>

@@ -22,9 +22,8 @@ paid built-in AI service.
   - Press `Space` on an empty line (or `/ai`) to have AI write into the page
   - AI side panel (`Ctrl+J`) to chat about the current page and insert answers
   - Responses stream in live; keys are stored only in the browser
-- **Claude integration (MCP)**: connect Notion(RE) to Claude Desktop or Claude Code and let
-  Claude manage your workspace on your existing Claude subscription — no API key needed.
-  Claude can list, read, search, create, edit and delete pages and blocks, and its changes
+- **Built-in Claude assistant**: the AI panel runs on the owner's own Claude (no API key) and
+  works as an agent — it can read, search, create and edit pages and blocks, and its changes
   appear live in the open app.
 - **Local-first**: the workspace is a file on your own computer, synced live to every open
   tab — no account, no cloud. Falls back to browser storage when run without the local server.

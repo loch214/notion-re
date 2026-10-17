@@ -36,7 +36,7 @@ export interface Block {
   last_edited_time: number
 }
 
-export type AIProvider = 'anthropic' | 'openai' | 'gemini' | 'openai-compatible'
+export type AIProvider = 'claude-code' | 'anthropic' | 'openai' | 'gemini' | 'openai-compatible'
 
 export interface AISettings {
   provider: AIProvider

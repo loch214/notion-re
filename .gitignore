@@ -1,12 +1,21 @@
 node_modules
 dist
-analysis/
 .env*
 *.log
+*.tmp
 
-# Core module kept private (showcase repo does not build without it)
+# ---- PRIVATE: never publish (see CLAUDE.md "Public repo rules") ----
+# Notion analysis notes
+analysis/
+# Workspace data (your pages)
+data/
+# Core modules: AI providers, MCP server, Claude subscription bridge
 src/ai.ts
 server/mcp.ts
-
-# Local workspace data
-data/
+server/claude-bridge.ts
+# Session/project notes for Claude Code
+CLAUDE.md
+plan.md
+resume.md
+NEXT-SESSION-PROMPT.md
+.claude/

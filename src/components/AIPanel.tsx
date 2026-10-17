@@ -1,33 +1,78 @@
 import { useEffect, useRef, useState } from 'react'
-import { activeModel, isConfigured, PROVIDERS, streamChat, type ChatMessage } from '../ai'
+import { activeModel, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
 import { pageTitle, useStore } from '../store'
 import { Markdown } from './Markdown'
 
 const QUICK = ['Summarize this page', 'List the action items', 'Suggest improvements to this page', 'Explain this page simply']
+const AGENT_QUICK = ['Summarize this page', 'Turn this page into a checklist', 'Add a weekly study plan to this page', 'Create a page for my project ideas']
+
+type PanelMessage = ChatMessage & { tools?: string[] }
 
 export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettings: () => void }) {
   const settings = useStore((s) => s.settings)
   const pageId = useStore((s) => s.currentPageId)
   const page = useStore((s) => (pageId ? s.blocks[pageId] : undefined))
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<PanelMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const abort = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const sessionId = useRef<string | undefined>(undefined)
+  const agent = settings.provider === 'claude-code'
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [messages])
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' })
+  }, [messages])
   useEffect(() => () => abort.current?.abort(), [])
+
+  const updateLast = (fn: (m: PanelMessage) => PanelMessage) =>
+    setMessages((ms) => [...ms.slice(0, -1), fn(ms[ms.length - 1])])
+
+  const newChat = () => {
+    setMessages([])
+    sessionId.current = undefined
+  }
 
   const send = async (text: string) => {
     if (!text.trim() || busy) return
     setInput('')
     setError('')
-    const history: ChatMessage[] = [...messages, { role: 'user', content: text }]
+    const history: PanelMessage[] = [...messages, { role: 'user', content: text }]
     setMessages([...history, { role: 'assistant', content: '' }])
     setBusy(true)
     abort.current = new AbortController()
+
+    if (agent) {
+      // Your own Claude, with tools to read and edit the workspace directly.
+      try {
+        sessionId.current = await claudeChat(
+          {
+            message: text,
+            mode: 'agent',
+            sessionId: sessionId.current,
+            pageId: pageId ?? undefined,
+            pageTitle: page?.properties.title,
+            model: settings.models['claude-code'] || undefined,
+          },
+          {
+            onText: (t) => updateLast((m) => ({ ...m, content: m.content + t })),
+            onTurn: () => updateLast((m) => (m.content && !m.content.endsWith('\n\n') ? { ...m, content: m.content + '\n\n' } : m)),
+            onTool: (_name, label) => updateLast((m) => ({ ...m, tools: [...(m.tools ?? []), label] })),
+          },
+          abort.current.signal,
+        )
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setError(e.message ?? String(e))
+          setMessages((ms) => (ms.at(-1)?.content || ms.at(-1)?.tools ? ms : ms.slice(0, -1)))
+        }
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
 
     const context = pageId ? pageToMarkdown(useStore.getState().blocks, pageId) : ''
     // The page is attached to the latest question so answers reflect current edits.
@@ -68,9 +113,11 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
     <aside className="ai-panel">
       <div className="ai-panel-head">
         <span>✨ AI assistant</span>
-        <span className="muted small">{isConfigured(settings) ? `${PROVIDERS[settings.provider].label.split(' ')[0]} · ${activeModel(settings)}` : ''}</span>
+        <span className="muted small">
+          {agent ? 'Your Claude' : isConfigured(settings) ? `${PROVIDERS[settings.provider].label.split(' ')[0]} · ${activeModel(settings)}` : ''}
+        </span>
         <span style={{ flex: 1 }} />
-        {messages.length > 0 && <button className="ctl" title="New chat" onClick={() => setMessages([])}>⟲</button>}
+        {messages.length > 0 && <button className="ctl" title="New chat" onClick={newChat}>⟲</button>}
         <button className="ctl" onClick={onClose} title="Close">✕</button>
       </div>
 
@@ -84,8 +131,10 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
           <div className="ai-messages">
             {messages.length === 0 && (
               <div className="ai-empty">
-                <p className="muted">Ask anything about <b>{pageTitle(page)}</b>.</p>
-                {QUICK.map((q) => (
+                <p className="muted">
+                  {agent ? <>Ask Claude anything, or ask it to edit <b>{pageTitle(page)}</b> or any page.</> : <>Ask anything about <b>{pageTitle(page)}</b>.</>}
+                </p>
+                {(agent ? AGENT_QUICK : QUICK).map((q) => (
                   <button key={q} className="menu-item" onClick={() => send(q)}>{q}</button>
                 ))}
               </div>
@@ -94,8 +143,13 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
               <div key={i} className={`msg ${m.role}`}>
                 {m.role === 'assistant' ? (
                   <>
-                    {m.content ? <Markdown text={m.content} /> : <span className="pulse">✨ Thinking…</span>}
-                    {m.content && !(busy && i === messages.length - 1) && (
+                    {m.tools?.map((t, j) => (
+                      <div key={j} className={`tool-step ${busy && i === messages.length - 1 && j === m.tools!.length - 1 && !m.content ? 'pulse' : ''}`}>
+                        ⚙️ {t}…
+                      </div>
+                    ))}
+                    {m.content ? <Markdown text={m.content} /> : !m.tools?.length && <span className="pulse">✨ Thinking…</span>}
+                    {m.content && !agent && !(busy && i === messages.length - 1) && (
                       <div className="msg-actions">
                         <button className="btn small" onClick={() => insertIntoPage(m.content)}>Insert into page</button>
                         <button className="btn small" onClick={() => navigator.clipboard.writeText(m.content)}>Copy</button>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { activeModel, PROVIDERS, streamChat } from '../ai'
+import { activeModel, claudeStatus, PROVIDERS, streamChat, type ClaudeStatus } from '../ai'
 import { htmlToText } from '../markdown'
 import { pagePath, pageTitle, useStore } from '../store'
 import type { AIProvider, AISettings } from '../types'
@@ -27,6 +27,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [test, setTest] = useState<{ state: 'idle' | 'running' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
 
   const p = s.provider
+  const [cc, setCc] = useState<ClaudeStatus | null>(null)
+  useEffect(() => {
+    if (p === 'claude-code') claudeStatus(true).then(setCc)
+  }, [p])
   const update = (patch: Partial<AISettings>) => {
     setS({ ...s, ...patch })
     setTest({ state: 'idle' })
@@ -70,22 +74,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </label>
       )}
 
-      <label className="field">
-        <span>API key</span>
-        <input
-          type="password"
-          autoComplete="off"
-          value={s.apiKeys[p] ?? ''}
-          placeholder={PROVIDERS[p].keyHint}
-          onChange={(e) => update({ apiKeys: { ...s.apiKeys, [p]: e.target.value.trim() } })}
-        />
-      </label>
+      {p === 'claude-code' ? (
+        <div className={`claude-status ${cc ? (cc.available ? 'ok' : 'fail') : ''}`}>
+          {!cc
+            ? 'Checking for Claude Code…'
+            : cc.available
+              ? <>✅ Using your Claude subscription through Claude Code ({cc.version}). No API key needed. In the AI panel, Claude can also read and edit your pages.</>
+              : <>Claude Code wasn't found. Install it, run <code>claude</code> once in a terminal to sign in, and start the app with <code>npm run dev</code>.</>}
+        </div>
+      ) : (
+        <label className="field">
+          <span>API key</span>
+          <input
+            type="password"
+            autoComplete="off"
+            value={s.apiKeys[p] ?? ''}
+            placeholder={PROVIDERS[p].keyHint}
+            onChange={(e) => update({ apiKeys: { ...s.apiKeys, [p]: e.target.value.trim() } })}
+          />
+        </label>
+      )}
 
       <label className="field">
-        <span>Model</span>
+        <span>Model{p === 'claude-code' ? ' (optional)' : ''}</span>
         <input
           value={s.models[p] ?? ''}
-          placeholder={PROVIDERS[p].defaultModel || 'e.g. llama3.1, anthropic/claude-sonnet-5-5'}
+          placeholder={p === 'claude-code' ? 'Default — or sonnet, opus, haiku' : PROVIDERS[p].defaultModel || 'e.g. llama3.1, anthropic/claude-sonnet-5-5'}
           onChange={(e) => update({ models: { ...s.models, [p]: e.target.value.trim() } })}
         />
       </label>
@@ -120,7 +134,9 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => inputRef.current?.focus(), [])
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
 
   // Search page titles and block text; results point at the containing page.
   const results = useMemo(() => {

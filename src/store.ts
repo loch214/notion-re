@@ -65,7 +65,7 @@ interface State {
 }
 
 const defaultSettings: AISettings = {
-  provider: 'anthropic',
+  provider: 'claude-code',
   apiKeys: {},
   models: {},
   baseUrl: '',

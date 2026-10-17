@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Connect, Plugin } from 'vite'
+import { claudeBridge } from './claude-bridge.ts'
 import { applySync, loadWorkspace, saveWorkspace } from './workspace.ts'
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -54,6 +55,8 @@ function setup(root: string, middlewares: Connect.Server) {
       json(res, 400, { error: e.message })
     }
   })
+
+  claudeBridge(root, middlewares)
 
   middlewares.use('/api/events', (req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })

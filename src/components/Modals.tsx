@@ -246,6 +246,21 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+const SHORTCUTS: [string, string][] = [["Search","Ctrl K / Ctrl P"],["Find in page","Ctrl F"],["New page","Ctrl N"],["AI panel","Ctrl J"],["Toggle sidebar","Ctrl \\"],["Settings","Ctrl ,"],["Dark / light mode","Ctrl Shift L"],["Back / forward","Ctrl [ / Ctrl ]"],["Copy page link","Ctrl L"],["Move page to…","Ctrl Shift P"],["Undo / redo","Ctrl Z / Ctrl Shift Z"],["Bold / italic / underline","Ctrl B / I / U"],["Strikethrough / code","Ctrl Shift S / Ctrl E"],["Highlight","Ctrl Shift H"],["Add link","Ctrl K (on selection)"],["Select block","Esc"],["Extend block selection","Shift ↑ / ↓ / click"],["Duplicate block","Ctrl D"],["Move block up / down","Ctrl Shift ↑ / ↓"],["Turn block into…","Ctrl Shift 0–9"],["Indent / outdent","Tab / Shift Tab"],["Open / close all toggles","Ctrl Alt T"],["Commands menu","/"],["Mention a page","@ or [["],["This list","Ctrl Alt /"]]
+
+export function ShortcutsModal({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Keyboard shortcuts" onClose={onClose}>
+      {SHORTCUTS.map(([a, k]) => (
+        <div key={a} className="shortcut-row">
+          <span>{a}</span>
+          <kbd>{k}</kbd>
+        </div>
+      ))}
+    </Modal>
+  )
+}
+
 export function TrashModal({ onClose }: { onClose: () => void }) {
   const blocks = useStore((s) => s.blocks)
   const { restorePage, purgePage } = useStore.getState()

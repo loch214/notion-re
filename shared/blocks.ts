@@ -253,6 +253,8 @@ export interface BlockSpec {
   type: BlockType
   title: string
   checked?: boolean
+  /** Code blocks: the language after the opening fence. */
+  language?: string
   /** Nesting level from list indentation (2 spaces or a tab per level). */
   depth: number
 }
@@ -266,7 +268,7 @@ export function markdownToBlocks(md: string): BlockSpec[] {
     if (/^\s*```/.test(line)) {
       const code: string[] = []
       while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i])
-      specs.push({ type: 'code', title: code.join('\n'), depth: 0 })
+      specs.push({ type: 'code', title: code.join('\n'), depth: 0, language: /^\s*```\s*([\w+#-]+)/.exec(line)?.[1]?.toLowerCase() })
       continue
     }
     const t = line.trim()

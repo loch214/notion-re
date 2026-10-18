@@ -15,6 +15,7 @@ import { pageTitle, useStore, visibleOrder } from '../store'
 import type { Block, BlockColor, BlockType } from '../types'
 import { activeSelection, clearFormatting, toggle, toggleHighlight } from '../formatting'
 import { getSelectionOffsets, marksIn, parse, plainText, render, replaceText, setMark, setSelectionOffsets, type Mark } from '../richtext'
+import { clearCodeHighlight, highlightCode } from '../codehl'
 import { blockClip, pasteBlocks } from './BlockSelection'
 import { EmojiPicker } from './Pickers'
 import { DatabaseView } from './DatabaseViews'
@@ -125,7 +126,10 @@ export function BlockList({ ids, pageId, depth = 0 }: { ids: string[]; pageId: s
   const sentinel = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!lazy || shown >= ids.length || !sentinel.current) return
-    const io = new IntersectionObserver((e) => e[0].isIntersecting && setShown((n) => n + LAZY_STEP), { rootMargin: '1200px' })
+    // The margin only widens the scroll area of the root, so the root must be the page's scroller.
+    let root: HTMLElement | null = sentinel.current.parentElement
+    while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement
+    const io = new IntersectionObserver((e) => e[0].isIntersecting && setShown((n) => n + LAZY_STEP), { root, rootMargin: '1200px' })
     io.observe(sentinel.current)
     return () => io.disconnect()
   }, [lazy, shown, ids.length])
@@ -224,6 +228,14 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     else el.innerHTML = block.properties.title
     localHtml.current = block.properties.title
   }, [block.properties.title, isCode])
+
+  // Syntax colours for code blocks (re-run on every text / language change).
+  const lang = block.format.code_language ?? 'plain text'
+  useEffect(() => {
+    if (!isCode || !ref.current) return
+    highlightCode(id, ref.current, lang)
+  }, [block.properties.title, lang, isCode, id])
+  useEffect(() => () => clearCodeHighlight(id), [id])
 
   useLayoutEffect(() => {
     if (focus?.id !== id || !ref.current) return

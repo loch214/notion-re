@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { markdownToBlocks } from '../markdown'
 import { pageTitle, useStore } from '../store'
 import { TriangleIcon } from './Icons'
 
@@ -29,6 +30,33 @@ function useRecents(current: string | null) {
     })
   }, [current])
   return ids
+}
+
+/** Each .md file becomes a new top-level page; the first "# Heading" is the title. */
+async function importMarkdown(files: FileList) {
+  const S = useStore.getState
+  for (const file of Array.from(files)) {
+    let md = await file.text()
+    let title = file.name.replace(/\.(md|markdown|txt)$/i, '')
+    const h1 = /^#\s+(.+)\r?\n?/.exec(md)
+    if (h1) {
+      title = h1[1].trim()
+      md = md.slice(h1[0].length)
+    }
+    S().transact(() => {
+      const page = S().createPage(null, title)
+      const stack: string[] = []
+      for (const spec of markdownToBlocks(md)) {
+        const depth = Math.min(spec.depth, stack.length)
+        const id = S().insertBlock({ parent: depth ? stack[depth - 1] : page, type: spec.type, title: spec.title })
+        if (spec.checked) S().updateBlock(id, { properties: { checked: true } })
+        if (spec.language) S().updateBlock(id, { format: { code_language: { js: 'javascript', ts: 'typescript', py: 'python', sh: 'bash', shell: 'bash', cpp: 'c++', csharp: 'c#' }[spec.language] ?? spec.language } })
+        stack[depth] = id
+        stack.length = depth + 1
+      }
+      S().openPage(page)
+    })
+  }
 }
 
 export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
@@ -118,6 +146,19 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
         <button className="side-item muted" onClick={() => useStore.getState().createDatabase({ parent: null })}>
           <span className="side-ic">▦</span> New database
         </button>
+        <label className="side-item muted">
+          <span className="side-ic">⤒</span> Import Markdown
+          <input
+            type="file"
+            accept=".md,.markdown,.txt"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) importMarkdown(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </label>
       </div>
 
       <div className="side-bottom">

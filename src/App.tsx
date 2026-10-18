@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { AIPanel } from './components/AIPanel'
-import { SearchModal, SettingsModal, TrashModal } from './components/Modals'
+import { SearchModal, SettingsModal, ShortcutsModal, TrashModal } from './components/Modals'
 import { HistoryModal } from './components/HistoryModal'
 import { copyPageLink, MovePageModal, PageMenu, toggleFavorite } from './components/PageMenu'
 import { PageView } from './components/PageView'
 import { Sidebar } from './components/Sidebar'
+import { FindBar } from './components/Find'
 import { FormatToolbar } from './components/FormatToolbar'
 import { pagePath, pageTitle, useStore } from './store'
 import { toggleTheme } from './theme'
 
-type ModalKind = 'search' | 'settings' | 'trash' | null
+type ModalKind = 'search' | 'settings' | 'trash' | 'shortcuts' | null
 
 export default function App() {
   const loaded = useStore((s) => s.loaded)
@@ -21,6 +22,7 @@ export default function App() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const announcement = useStore((s) => s.announcement)
 
   useEffect(() => {
@@ -32,6 +34,16 @@ export default function App() {
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
       if (e.defaultPrevented) return
+      if (mod && !e.shiftKey && !e.altKey && key === 'f') {
+        e.preventDefault()
+        setFindOpen(true)
+        return
+      }
+      if (mod && e.altKey && (e.key === '/' || e.code === 'Slash')) {
+        e.preventDefault()
+        setModal('shortcuts')
+        return
+      }
       // Undo / redo for the workspace. Text boxes (AI prompt, database cells) keep their own.
       const inTextBox = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
       if (mod && !e.altKey && !inTextBox && (key === 'z' || key === 'y')) {
@@ -145,6 +157,8 @@ export default function App() {
           )}
         </div>
       </main>
+      {findOpen && <FindBar onClose={() => setFindOpen(false)} />}
+      {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
       {aiOpen && <AIPanel onClose={() => setAiOpen(false)} onSettings={() => setModal('settings')} />}
 
       {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} onHistory={() => setHistoryOpen(true)} onMove={() => setMoveOpen(true)} />}

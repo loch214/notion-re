@@ -2,7 +2,7 @@
 // Modelled on Notion's collection views (analysis/databases.md), our own implementation.
 
 import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator, PropertyType, ViewType } from '../src/types'
-import { cellText, dbRows, shortId } from './blocks.ts'
+import { cellRaw, cellText, dbRows, isSingleChoice, shortId } from './blocks.ts'
 
 export const VIEW_TYPES: { type: ViewType; label: string; icon: string }[] = [
   { type: 'table', label: 'Table', icon: '▦' },
@@ -20,7 +20,7 @@ export function newView(type: ViewType, schema: DbProperty[], name?: string): Db
     sort: [],
     filter: { operator: 'and', filters: [] },
   }
-  if (type === 'board') view.group_by = schema.find((p) => p.type === 'select')?.id
+  if (type === 'board') view.group_by = schema.find((p) => isSingleChoice(p.type))?.id
   if (type === 'calendar') view.calendar_by = schema.find((p) => p.type === 'date')?.id
   if (type === 'gallery') view.cover = 'page_content'
   return view
@@ -63,6 +63,9 @@ export const OPERATORS: Record<PropertyType, { op: FilterOperator; label: string
     { op: 'is_empty', label: 'is empty' },
     { op: 'is_not_empty', label: 'is not empty' },
   ],
+  status: [],
+  created_time: [],
+  last_edited_time: [],
   checkbox: [{ op: 'checkbox_is', label: 'is' }],
   date: [
     { op: 'date_is', label: 'is' },
@@ -73,12 +76,15 @@ export const OPERATORS: Record<PropertyType, { op: FilterOperator; label: string
   ],
 }
 OPERATORS.text = OPERATORS.title
+OPERATORS.status = OPERATORS.select
+OPERATORS.created_time = OPERATORS.date
+OPERATORS.last_edited_time = OPERATORS.date
 OPERATORS.url = OPERATORS.title
 
 export const needsValue = (op: FilterOperator) => op !== 'is_empty' && op !== 'is_not_empty'
 
 function rawValue(prop: DbProperty, row: Block): CellValue {
-  return prop.type === 'title' ? row.properties.title : row.properties.cells?.[prop.id] ?? null
+  return cellRaw(prop, row)
 }
 
 const isEmpty = (v: CellValue) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)
@@ -122,7 +128,7 @@ function compare(prop: DbProperty, a: Block, b: Block): number {
   if (isEmpty(vb)) return -1
   if (prop.type === 'number') return (va as number) - (vb as number)
   if (prop.type === 'checkbox') return Number(!!va) - Number(!!vb)
-  if (prop.type === 'select') {
+  if (isSingleChoice(prop.type)) {
     // Options sort in their defined order.
     const order = (id: CellValue) => prop.options?.findIndex((o) => o.id === id) ?? 0
     return order(va) - order(vb)
@@ -169,14 +175,14 @@ export function prefillFor(view: DbView): Record<string, CellValue> {
 
 /** Board columns: one per option of the group-by property, plus "No <property>" first. */
 export function boardGroups(db: Block, view: DbView, rows: Block[]) {
-  const prop = db.schema?.find((p) => p.id === view.group_by && p.type === 'select')
+  const prop = db.schema?.find((p) => p.id === view.group_by && isSingleChoice(p.type))
   if (!prop) return null
   const groups = [
     { id: null as string | null, label: `No ${prop.name}`, color: 'default' as const, rows: [] as Block[] },
     ...(prop.options ?? []).map((o) => ({ id: o.id as string | null, label: o.name, color: o.color, rows: [] as Block[] })),
   ]
   for (const r of rows) {
-    const v = r.properties.cells?.[prop.id]
+    const v = cellRaw(prop, r)
     ;(groups.find((g) => g.id === (typeof v === 'string' ? v : null)) ?? groups[0]).rows.push(r)
   }
   return { prop, groups }
@@ -191,7 +197,7 @@ export function describeView(db: Block, view: DbView): string {
     const op = prop ? OPERATORS[prop.type].find((o) => o.op === f.operator)?.label ?? f.operator : f.operator
     const value = !needsValue(f.operator)
       ? ''
-      : prop?.type === 'select' || prop?.type === 'multi_select'
+      : (prop && isSingleChoice(prop.type)) || prop?.type === 'multi_select'
         ? ` "${prop.options?.find((o) => o.id === f.value)?.name ?? f.value}"`
         : ` ${JSON.stringify(f.value)}`
     return `${name(f.property)} ${op}${value}`

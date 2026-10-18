@@ -68,7 +68,7 @@ export function render(segs: Seg[]): string {
     .map(({ text, marks }) => {
       let h = escapeHtml(text).replace(/\n/g, '<br>')
       for (const m of [...marks].reverse()) {
-        if (m.startsWith('a:')) h = `<a href="${escapeHtml(m.slice(2))}" target="_blank" rel="noopener noreferrer">${h}</a>`
+        if (m.startsWith('a:')) h = m.startsWith('a:#/') ? `<a href="${escapeHtml(m.slice(2))}">${h}</a>` : `<a href="${escapeHtml(m.slice(2))}" target="_blank" rel="noopener noreferrer">${h}</a>`
         else if (m.startsWith('c:')) h = `<span data-color="${m.slice(2)}">${h}</span>`
         else h = `<${m}>${h}</${m}>`
       }

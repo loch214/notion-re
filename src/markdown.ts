@@ -30,6 +30,7 @@ export function sanitizeHtml(html: string): string {
     }
     if (tag === 'a') {
       const href = el.getAttribute('href') ?? ''
+      if (/^#\/[\w-]+$/.test(href)) return `<a href="${href}">${inner}</a>`
       if (!/^(https?:|mailto:)/i.test(href)) return inner
       return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
     }

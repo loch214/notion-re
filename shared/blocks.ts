@@ -1,7 +1,7 @@
 // Pure block helpers shared by the web app and the Node side (sync server, MCP).
 // No DOM APIs in here.
 
-import type { Block, BlockColor, BlockType, ColorName, DbProperty, OptionColor, PropertyType } from '../src/types'
+import type { Block, BlockColor, BlockType, CellValue, ColorName, DbProperty, OptionColor, PropertyType, SelectOption } from '../src/types'
 
 export interface Workspace {
   blocks: Record<string, Block>
@@ -109,11 +109,38 @@ export const PROPERTY_TYPES: { type: PropertyType; label: string; icon: string }
   { type: 'text', label: 'Text', icon: '≡' },
   { type: 'number', label: 'Number', icon: '#' },
   { type: 'select', label: 'Select', icon: '⊙' },
+  { type: 'status', label: 'Status', icon: '◐' },
   { type: 'multi_select', label: 'Multi-select', icon: '☰' },
   { type: 'date', label: 'Date', icon: '📅' },
   { type: 'checkbox', label: 'Checkbox', icon: '☑' },
   { type: 'url', label: 'URL', icon: '🔗' },
+  { type: 'created_time', label: 'Created time', icon: '🕓' },
+  { type: 'last_edited_time', label: 'Last edited time', icon: '🕓' },
 ]
+
+/** Single-choice column types (select behaves the same as status; status starts with Notion's three stages). */
+export const isSingleChoice = (t: string) => t === 'select' || t === 'status'
+
+export function statusOptions(): SelectOption[] {
+  return [
+    { id: shortId(), name: 'Not started', color: 'gray' },
+    { id: shortId(), name: 'In progress', color: 'blue' },
+    { id: shortId(), name: 'Done', color: 'green' },
+  ]
+}
+
+const isoDay = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Raw value of a row's cell; created / last edited time come from the row itself. */
+export function cellRaw(prop: DbProperty, row: Block): CellValue {
+  if (prop.type === 'title') return row.properties.title
+  if (prop.type === 'created_time') return isoDay(row.created_time)
+  if (prop.type === 'last_edited_time') return isoDay(row.last_edited_time)
+  return row.properties.cells?.[prop.id] ?? null
+}
 
 export const shortId = () => crypto.randomUUID().slice(0, 8)
 
@@ -128,12 +155,13 @@ export function defaultSchema(): DbProperty[] {
 /** Plain-text form of a row's cell (used for Markdown, search, and sorting). */
 export function cellText(prop: DbProperty, row: Block): string {
   if (prop.type === 'title') return row.properties.title
-  const v = row.properties.cells?.[prop.id]
+  const v = cellRaw(prop, row)
   if (v === undefined || v === null || v === '') return ''
   const optName = (id: string) => prop.options?.find((o) => o.id === id)?.name ?? ''
   switch (prop.type) {
     case 'checkbox': return v ? 'Yes' : 'No'
-    case 'select': return optName(String(v))
+    case 'select':
+    case 'status': return optName(String(v))
     case 'multi_select': return (Array.isArray(v) ? v : []).map(optName).filter(Boolean).join(', ')
     default: return String(v)
   }
@@ -191,6 +219,8 @@ export function inlineMarkdownToHtml(md: string): string {
   h = h.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
   h = h.replace(/~~([^~]+)~~/g, '<s>$1</s>')
   h = h.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+  // Link to another page of this workspace: [Title](#/<pageId>)
+  h = h.replace(/\[([^\]]+)\]\((#\/[\w-]+)\)/g, '<a href="$2">$1</a>')
   h = h.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/g, '<u>$1</u>')
   for (let i = 0; i < 3; i++) {
     // Repeat for nested spans (colour inside highlight).

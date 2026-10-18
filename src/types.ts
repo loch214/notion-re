@@ -62,6 +62,8 @@ export interface Block {
     /** Pages only. */
     page_font?: PageFont
     full_width?: boolean
+    /** Database only: shown inside its parent page instead of as a link to its own page. */
+    inline?: boolean
     /** Pages only: soft tint behind the whole page. */
     background?: ColorName
     /** Pages only: Notion's "Small text" switch. */
@@ -100,7 +102,7 @@ export interface Block {
   last_edited_time: number
 }
 
-export type PropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'date' | 'checkbox' | 'url'
+export type PropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'date' | 'checkbox' | 'url' | 'status' | 'created_time' | 'last_edited_time'
 
 export type OptionColor = 'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 

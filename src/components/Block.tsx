@@ -10,11 +10,14 @@ import {
   splitAtCaret,
 } from '../caret'
 import { htmlToText, inlineMarkdownToHtml, markdownToBlocks, sanitizeHtml } from '../markdown'
-import { COLOR_NAMES } from '../../shared/blocks.ts'
+import { COLOR_NAMES, escapeHtml } from '../../shared/blocks.ts'
 import { pageTitle, useStore, visibleOrder } from '../store'
 import type { Block, BlockColor, BlockType } from '../types'
 import { activeSelection, clearFormatting, toggle, toggleHighlight } from '../formatting'
 import { getSelectionOffsets, marksIn, parse, plainText, render, replaceText, setMark, setSelectionOffsets, type Mark } from '../richtext'
+import { blockClip, pasteBlocks } from './BlockSelection'
+import { EmojiPicker } from './Pickers'
+import { DatabaseView } from './DatabaseViews'
 import { AIInline } from './AIInline'
 import { DragIcon, PlusIcon, TriangleIcon } from './Icons'
 import { filterMenu, MENU_ITEMS, SlashMenu, type MenuItem } from './SlashMenu'
@@ -110,22 +113,65 @@ export function listMarker(block: Block, number: number, depth: number): string 
   return (f === 'letters' ? toLetters(number) : f === 'roman' ? toRoman(number) : String(number)) + '.'
 }
 
-const CALLOUT_ICONS = ['💡', '⚠️', '📌', '✅', '❗', '🔥', 'ℹ️', '📝']
+
+const LAZY_FROM = 80
+const LAZY_STEP = 60
 
 export function BlockList({ ids, pageId, depth = 0 }: { ids: string[]; pageId: string; depth?: number }) {
   const blocks = useStore((s) => s.blocks)
+  // Very long pages render in chunks as you scroll, so opening them stays fast.
+  const lazy = depth === 0 && ids.length > LAZY_FROM
+  const [shown, setShown] = useState(LAZY_STEP)
+  const sentinel = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!lazy || shown >= ids.length || !sentinel.current) return
+    const io = new IntersectionObserver((e) => e[0].isIntersecting && setShown((n) => n + LAZY_STEP), { rootMargin: '1200px' })
+    io.observe(sentinel.current)
+    return () => io.disconnect()
+  }, [lazy, shown, ids.length])
+  const visible = lazy ? ids.slice(0, shown) : ids
   let n = 0
   return (
     <>
-      {ids.map((id) => {
+      {visible.map((id) => {
         const b = blocks[id]
         if (!b?.alive) return null
         // A run of numbered items counts up from the first item's start number ("5. " starts at 5).
         n = b.type === 'numbered_list' ? (n === 0 ? b.format.list_start_index ?? 1 : n + 1) : 0
         return <BlockView key={id} id={id} pageId={pageId} number={n} depth={depth} />
       })}
+      {lazy && shown < ids.length && <div ref={sentinel} style={{ height: 1 }} />}
     </>
   )
+}
+
+interface MentionState {
+  start: number
+  query: string
+  active: number
+  rect: DOMRect
+}
+
+const dateLabel = (plus = 0) => {
+  const d = new Date()
+  d.setDate(d.getDate() + plus)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+/** Items for the @ menu: matching pages (most recently edited first), then a few dates. */
+function mentionItems(query: string, selfPage: string): MenuItem[] {
+  const q = query.trim().toLowerCase()
+  const { blocks } = useStore.getState()
+  const pages = Object.values(blocks)
+    .filter((b) => b.type === 'page' && b.alive && b.id !== selfPage && !blocks[b.parent_id ?? '']?.schema && pageTitle(b).toLowerCase().includes(q))
+    .sort((a, b) => b.last_edited_time - a.last_edited_time)
+    .slice(0, 8)
+    .map((b): MenuItem => ({ key: `page:${b.id}`, label: pageTitle(b), hint: 'Link to page', icon: b.format.icon ?? '📄', aliases: [], section: 'Pages' }))
+  const dates: [string, number][] = [['Today', 0], ['Tomorrow', 1], ['Yesterday', -1]]
+  const dateItems = dates
+    .filter(([n]) => q && n.toLowerCase().startsWith(q))
+    .map(([n, d]): MenuItem => ({ key: `date:${dateLabel(d)}`, label: n, hint: dateLabel(d), icon: '📅', aliases: [], section: 'Dates' }))
+  return [...pages, ...dateItems]
 }
 
 interface SlashState {
@@ -138,6 +184,7 @@ interface SlashState {
 function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; number: number; depth: number }) {
   const block = useStore((s) => s.blocks[id]) as Block
   const focus = useStore((s) => s.focus)
+  const selected = useStore((s) => s.selection.includes(id))
   // "Lock page": text can still be read, selected and copied, and toggles opened — not edited.
   const locked = useStore((s) => !!s.blocks[pageId]?.format.locked)
   const ref = useRef<HTMLDivElement>(null)
@@ -145,6 +192,9 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
   const localHtml = useRef<string | null>(null)
   const pendingSlash = useRef<number | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
+  const [mention, setMention] = useState<MentionState | null>(null)
+  const [iconRect, setIconRect] = useState<DOMRect | null>(null)
+  const pendingMention = useRef<number | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiSelection, setAiSelection] = useState<{ start: number; end: number; text: string } | undefined>()
 
@@ -274,6 +324,26 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
       return
     }
 
+    if (!isCode && !mention && ev?.inputType === 'insertText' && text.slice(0, caretOffset(el)).endsWith('[[')) {
+      // "[[" opens the page picker too.
+      const c = caretOffset(el)
+      deleteTextRange(el, c - 2, c)
+      document.execCommand('insertText', false, '@')
+      setMention({ start: c - 2, query: '', active: 0, rect: caretClientRect(el) })
+    } else if (pendingMention.current !== null) {
+      setMention({ start: pendingMention.current, query: '', active: 0, rect: caretClientRect(el) })
+      pendingMention.current = null
+    } else if (mention) {
+      const caret = caretOffset(el)
+      const t = el.textContent ?? ''
+      if (caret <= mention.start || t[mention.start] !== '@') setMention(null)
+      else {
+        const query = t.slice(mention.start + 1, caret)
+        if (query.endsWith('  ') || (query.endsWith(' ') && mentionItems(query, pageId).length === 0)) setMention(null)
+        else setMention({ ...mention, query, active: 0 })
+      }
+    }
+
     if (pendingSlash.current !== null) {
       setSlash({ start: pendingSlash.current, query: '', active: 0, rect: caretClientRect(el) })
       pendingSlash.current = null
@@ -298,6 +368,17 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     const empty = !blocks[id].properties.title
 
     if (item.key === 'ai') return setAiOpen(true)
+    if (item.key === 'link_page') {
+      el.focus()
+      pendingMention.current = caretOffset(el)
+      document.execCommand('insertText', false, '@')
+      return
+    }
+    if (item.key === 'database_inline') {
+      createDatabase({ parent: blocks[id].parent_id!, after: id, inline: true })
+      if (empty && block.type === 'text') removeBlock(id)
+      return
+    }
     if (item.key === 'database') {
       createDatabase({ parent: blocks[id].parent_id!, after: id })
       if (empty && block.type === 'text') removeBlock(id)
@@ -339,9 +420,41 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     } else requestFocus({ id: target, at: 'end' })
   }
 
+  const pickMention = (item: MenuItem) => {
+    const el = ref.current!
+    if (!mention) return
+    deleteTextRange(el, mention.start, mention.start + 1 + mention.query.length)
+    setMention(null)
+    if (item.key.startsWith('page:')) {
+      const target = S().blocks[item.key.slice(5)]
+      document.execCommand('insertHTML', false, `<a href="#/${target.id}">${escapeHtml((target.format.icon ?? '📄') + ' ' + pageTitle(target))}</a>&nbsp;`)
+    } else document.execCommand('insertText', false, item.key.slice(5) + ' ')
+    save()
+  }
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = ref.current!
     const store = S()
+
+    if (mention) {
+      const items = mentionItems(mention.query, pageId)
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMention({ ...mention, active: (mention.active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % Math.max(items.length, 1) })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        if (items[mention.active]) pickMention(items[mention.active])
+        else setMention(null)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMention(null)
+        return
+      }
+    }
 
     if (slash) {
       const items = filterMenu(slash.query)
@@ -416,6 +529,12 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
       }
       if (to !== block.type) store.setType(id, to)
       store.requestFocus({ id, at: caretOffset(el) })
+      return
+    }
+
+    if (e.key === '@' && !isCode && !e.ctrlKey && !e.metaKey) {
+      const before = (el.textContent ?? '').slice(0, caretOffset(el))
+      if (!before || /\s$/.test(before)) pendingMention.current = caretOffset(el)
       return
     }
 
@@ -551,12 +670,24 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
       focusSibling(1, 'end')
       return
     }
-    if (e.key === 'Escape') el.blur()
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      store.setSelection([id])
+      el.blur()
+    }
   }
 
   const onPaste = (e: React.ClipboardEvent) => {
     e.preventDefault()
     const text = e.clipboardData.getData('text/plain')
+    if (blockClip.trees.length && text === blockClip.text && !isCode) {
+      S().transact(() => {
+        const last = pasteBlocks(id)
+        if (!block.properties.title && block.type === 'text' && !block.content.length) S().removeBlock(id)
+        S().requestFocus({ id: last, at: 'end' })
+      })
+      return
+    }
     if (isCode || !text.includes('\n')) {
       document.execCommand('insertText', false, text)
       return
@@ -601,7 +732,22 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
       onInput={(e) => S().transact(() => onInput(e.nativeEvent as InputEvent))}
       onKeyDown={(e) => S().transact(() => onKeyDown(e))}
       onPaste={onPaste}
-      onBlur={() => setTimeout(() => setSlash(null), 150)}
+      onBlur={() =>
+        setTimeout(() => {
+          setSlash(null)
+          setMention(null)
+        }, 150)
+      }
+      onClick={(e) => {
+        // Links to other pages open in the app; ordinary links open with Ctrl+click.
+        const a = (e.target as HTMLElement).closest('a')
+        const href = a?.getAttribute('href') ?? ''
+        if (href.startsWith('#/')) {
+          e.preventDefault()
+          const target = href.slice(2)
+          if (S().blocks[target]?.alive) S().openPage(target)
+        } else if (a && (e.ctrlKey || e.metaKey)) window.open(href, '_blank', 'noopener')
+      }}
     />
   )
 
@@ -646,10 +792,7 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
         <button
           className="callout-icon"
           title="Change icon"
-          onClick={() => {
-            const i = CALLOUT_ICONS.indexOf(block.format.icon ?? '')
-            S().updateBlock(id, { format: { icon: CALLOUT_ICONS[(i + 1) % CALLOUT_ICONS.length] } })
-          }}
+          onClick={(e) => setIconRect(e.currentTarget.getBoundingClientRect())}
         >
           {block.format.icon ?? '💡'}
         </button>
@@ -662,7 +805,7 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
   return (
     <div
       ref={rowRef}
-      className={`block-row type-${block.type} ${isToggle ? 'is-toggle' : ''} ${block.format.quote_size === 'large' ? 'quote-large' : ''} ${block.format.color ? `color-${block.format.color}` : ''} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''}`}
+      className={`block-row type-${block.type} ${isToggle ? 'is-toggle' : ''} ${block.format.quote_size === 'large' ? 'quote-large' : ''} ${block.format.color ? `color-${block.format.color}` : ''} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''} ${selected ? 'selected' : ''}`}
       data-block-id={id}
       onDragOver={onDragOver}
       onDragLeave={() => setDropPos(null)}
@@ -708,6 +851,8 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
           <TableOfContents pageId={pageId} />
         ) : block.type === 'column_list' ? (
           <Columns block={block} pageId={pageId} locked={locked} />
+        ) : block.type === 'page' && block.schema && block.format.inline ? (
+          <InlineDatabase block={block} locked={locked} />
         ) : block.type === 'page' ? (
           <div className="page-link" onClick={() => S().openPage(id)}>
             <span>{block.format.icon ?? '📄'}</span>
@@ -770,6 +915,16 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
           onHover={(i) => setSlash({ ...slash, active: i })}
         />
       )}
+      {iconRect && <EmojiPicker anchor={iconRect} onClose={() => setIconRect(null)} onPick={(icon) => S().updateBlock(id, { format: { icon: icon ?? '💡' } })} />}
+      {mention && (
+        <SlashMenu
+          items={mentionItems(mention.query, pageId)}
+          active={mention.active}
+          anchor={mention.rect}
+          onPick={(item) => S().transact(() => pickMention(item))}
+          onHover={(i) => setMention({ ...mention, active: i })}
+        />
+      )}
       {showChildren && (
         <div className="block-children">
           <BlockList ids={block.content} pageId={pageId} depth={depth + 1} />
@@ -786,6 +941,27 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
           {block.type === 'toggle' ? 'Empty toggle. Click or drop blocks inside.' : 'Empty toggle heading. Click or drop blocks inside.'}
         </div>
       )}
+    </div>
+  )
+}
+
+/** A database shown right inside a page: its own title, then the table / board / … views. */
+function InlineDatabase({ block, locked }: { block: Block; locked: boolean }) {
+  return (
+    <div className="inline-db">
+      <div className="inline-db-head">
+        <input
+          className="inline-db-title"
+          value={block.properties.title}
+          placeholder="Untitled database"
+          readOnly={locked}
+          onChange={(e) => useStore.getState().updateBlock(block.id, { properties: { title: e.target.value } })}
+        />
+        <button className="btn-ghost small" title="Open as full page" onClick={() => useStore.getState().openPage(block.id)}>
+          ⤢ Open
+        </button>
+      </div>
+      <DatabaseView dbId={block.id} />
     </div>
   )
 }

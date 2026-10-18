@@ -2,7 +2,7 @@
 // and the non-table layouts. Modelled on Notion's collection views (analysis/databases.md).
 
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
-import { coverCss, htmlToPlain, shortId } from '../../shared/blocks.ts'
+import { cellRaw, coverCss, htmlToPlain, isSingleChoice, shortId, statusOptions } from '../../shared/blocks.ts'
 import { applyView, boardGroups, getViews, needsValue, newView, OPERATORS, prefillFor, VIEW_TYPES } from '../../shared/views.ts'
 import { pageTitle, useStore } from '../store'
 import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator } from '../types'
@@ -112,7 +112,7 @@ function ViewMenu({ db, view, anchor, onClose, canDelete }: { db: Block; view: D
   const schema = db.schema!
   const [name, setName] = useState(view.name)
   const saveName = () => name.trim() && name !== view.name && updateView(db, view.id, { name: name.trim() })
-  const selects = schema.filter((p) => p.type === 'select')
+  const selects = schema.filter((p) => isSingleChoice(p.type))
   const dates = schema.filter((p) => p.type === 'date')
   const set = (patch: Partial<DbView>) => updateView(db, view.id, patch)
 
@@ -193,12 +193,12 @@ function ViewMenu({ db, view, anchor, onClose, canDelete }: { db: Block; view: D
 
 function defaultFilter(prop: DbProperty): DbFilter {
   const op = OPERATORS[prop.type][0].op
-  return { property: prop.id, operator: op, value: prop.type === 'checkbox' ? true : prop.type === 'select' || prop.type === 'multi_select' ? prop.options?.[0]?.id ?? null : '' }
+  return { property: prop.id, operator: op, value: prop.type === 'checkbox' ? true : isSingleChoice(prop.type) || prop.type === 'multi_select' ? prop.options?.[0]?.id ?? null : '' }
 }
 
 function FilterValue({ prop, filter, onChange }: { prop: DbProperty; filter: DbFilter; onChange: (v: CellValue) => void }) {
   if (!needsValue(filter.operator)) return null
-  if (prop.type === 'select' || prop.type === 'multi_select') {
+  if (isSingleChoice(prop.type) || prop.type === 'multi_select') {
     return (
       <select value={String(filter.value ?? '')} onChange={(e) => onChange(e.target.value || null)}>
         <option value="">—</option>
@@ -308,9 +308,9 @@ function CardProps({ db, row, view, skip }: { db: Block; row: Block; view: DbVie
   return (
     <>
       {props.map((p) => {
-        const v = row.properties.cells?.[p.id]
+        const v = cellRaw(p, row)
         if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) || (p.type === 'checkbox' && !v)) return null
-        if (p.type === 'select' || p.type === 'multi_select') {
+        if (isSingleChoice(p.type) || p.type === 'multi_select') {
           const ids = Array.isArray(v) ? v : [String(v)]
           return (
             <div key={p.id} className="db-card-prop">
@@ -374,7 +374,7 @@ function BoardBody({ db, rows, view, newRow }: BodyProps) {
     return (
       <div className="db-empty-view">
         A board groups rows into columns by a <b>Select</b> property.{' '}
-        <button className="btn small" onClick={() => addProperty(db, 'select', 'Status', (id) => updateView(db, view.id, { group_by: id }))}>
+        <button className="btn small" onClick={() => addProperty(db, 'status', 'Status', (id) => updateView(db, view.id, { group_by: id }))}>
           Add a “Status” property
         </button>
       </div>
@@ -470,7 +470,7 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
   const days = Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))
   const byDay = new Map<string, Block[]>()
   for (const r of rows) {
-    const d = r.properties.cells?.[prop.id]
+    const d = cellRaw(prop, r)
     if (typeof d === 'string') byDay.set(d, [...(byDay.get(d) ?? []), r])
   }
   const today = isoDay(new Date())
@@ -513,7 +513,7 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
 function addProperty(db: Block, type: DbProperty['type'], name: string, then: (id: string) => void) {
   const id = shortId()
   S().transact(() => {
-    S().updateBlock(db.id, { schema: [...db.schema!, { id, name, type, ...(type === 'select' ? { options: [] } : {}) }] })
+    S().updateBlock(db.id, { schema: [...db.schema!, { id, name, type, ...(type === 'status' ? { options: statusOptions() } : type === 'select' ? { options: [] } : {}) }] })
     then(id)
   })
 }

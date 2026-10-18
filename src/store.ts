@@ -5,6 +5,8 @@ import type { AISettings, Block, BlockType, CellValue } from './types'
 
 const DB_KEY = 'notion-re:workspace'
 const SETTINGS_KEY = 'notion-re:ai-settings'
+/** Copy of the server's workspace, so a slow server doesn't mean a blank screen on start. */
+const CACHE_KEY = 'notion-re:server-cache'
 /** Settings → Open on start: a page id, or empty for the last visited page. */
 export const START_PAGE_KEY = 'notion-re:start-page'
 
@@ -53,10 +55,13 @@ interface State {
   mergeRemote: (remote: Workspace) => void
   openPage: (id: string | null) => void
   requestFocus: (f: FocusRequest | null) => void
+  /** Blocks picked with Esc / Shift+click / drag-select (see BlockSelection.tsx). */
+  selection: string[]
+  setSelection: (ids: string[]) => void
 
   createPage: (parentId: string | null, title?: string) => string
   /** New full-page database, at the top level or inside `parent` (after block `after`). Opens it. */
-  createDatabase: (opts: { parent: string | null; after?: string }) => string
+  createDatabase: (opts: { parent: string | null; after?: string; inline?: boolean }) => string
   addRow: (dbId: string, title?: string, cells?: Record<string, CellValue>) => string
   setCell: (rowId: string, propId: string, value: CellValue) => void
   /** Copy a block or page (with everything inside it) right after the original. */
@@ -78,6 +83,8 @@ interface State {
   moveBlock: (id: string, targetId: string, position: 'before' | 'after') => void
   /** "Move to": put a page at the end of another page, or at the top level (`null`). */
   movePage: (id: string, parentId: string | null) => void
+  /** Drag-and-drop in the sidebar: put page `id` before / after / inside page `targetId`. */
+  placePage: (id: string, targetId: string, where: 'before' | 'after' | 'inside') => void
   saveSettings: (s: AISettings) => void
 
   /** Bumped whenever the undo/redo stacks change, so UI can re-render. */
@@ -256,6 +263,7 @@ function pushToServer(s: Pick<State, 'blocks' | 'rootPages'>, beacon = false) {
     })
 }
 
+let lastCache = 0
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let pending: State | null = null
 function writeNow(beacon = false) {
@@ -264,7 +272,13 @@ function writeNow(beacon = false) {
   const s = pending
   pending = null
   localStorage.setItem('notion-re:current-page', s.currentPageId ?? '')
-  if (mode === 'server') pushToServer(s, beacon)
+  if (mode === 'server') {
+    pushToServer(s, beacon)
+    if (!beacon && Date.now() - lastCache > 3000) {
+      lastCache = Date.now()
+      idbSet(CACHE_KEY, { blocks: s.blocks, rootPages: s.rootPages, currentPageId: s.currentPageId })
+    }
+  }
   else idbSet(DB_KEY, { blocks: s.blocks, rootPages: s.rootPages, currentPageId: s.currentPageId })
 }
 function persist(s: State) {
@@ -360,10 +374,22 @@ export const useStore = create<State>((set, get) => {
     rootPages: [],
     currentPageId: null,
     focus: null,
+    selection: [],
+    setSelection: (selection) => set({ selection }),
     settings: defaultSettings,
 
     load: async () => {
-      const [server, local, settings] = await Promise.all([fetchServerWorkspace(), idbGet(DB_KEY), idbGet(SETTINGS_KEY)])
+      const serverP = fetchServerWorkspace()
+      // Server slow to answer: show the last copy we saw right away, then switch to the real data.
+      const fast = await Promise.race([serverP.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 150))])
+      if (!fast) {
+        const cached = (await idbGet(CACHE_KEY)) as (Workspace & { currentPageId?: string | null }) | undefined
+        if (cached && !get().loaded) {
+          const id = cached.currentPageId && cached.blocks[cached.currentPageId] ? cached.currentPageId : null
+          set({ blocks: cached.blocks, rootPages: normalizeRoots(cached.blocks, cached.rootPages), currentPageId: id, loaded: true })
+        }
+      }
+      const [server, local, settings] = await Promise.all([serverP, idbGet(DB_KEY), idbGet(SETTINGS_KEY)])
       const savedPage = localStorage.getItem('notion-re:current-page')
       // A link like #/<pageId> wins over the last page you had open.
       const linked = location.hash.match(/^#\/([\w-]+)/)?.[1]
@@ -391,7 +417,11 @@ export const useStore = create<State>((set, get) => {
       if (rootPages.join() !== ws.rootPages.join()) seed = true
       set({ blocks: ws.blocks, rootPages, currentPageId, settings: { ...defaultSettings, ...settings }, loaded: true })
       if (seed) persist(get())
-      if (mode === 'server') listenForChanges()
+      if (mode === 'server') {
+        lastCache = Date.now()
+        idbSet(CACHE_KEY, { blocks: ws.blocks, rootPages, currentPageId })
+        listenForChanges()
+      }
     },
 
     mergeRemote: (remote) => {
@@ -445,8 +475,9 @@ export const useStore = create<State>((set, get) => {
       return page.id
     },
 
-    createDatabase: ({ parent, after }) => {
+    createDatabase: ({ parent, after, inline }) => {
       const db = makeBlock('page', parent, '')
+      if (inline && parent) db.format.inline = true
       db.format.icon = '🗂️'
       db.schema = defaultSchema()
       mutate((blocks, s) => {
@@ -462,7 +493,7 @@ export const useStore = create<State>((set, get) => {
         const at = after ? content.indexOf(after) + 1 : content.length
         content.splice(at, 0, db.id)
         touch(blocks, parent, { content })
-        return { currentPageId: db.id }
+        return inline ? {} : { currentPageId: db.id }
       })
       return db.id
     },
@@ -675,6 +706,26 @@ export const useStore = create<State>((set, get) => {
         content.splice(content.indexOf(targetId) + (position === 'after' ? 1 : 0), 0, id)
         touch(blocks, newParent, { content })
         touch(blocks, id, { parent_id: newParent })
+      }),
+
+    placePage: (id, targetId, where) =>
+      mutate((blocks, s) => {
+        const b = blocks[id]
+        const t = blocks[targetId]
+        if (!b || !t || b.type !== 'page' || id === targetId) return
+        const parentId = where === 'inside' ? targetId : t.parent_id
+        if (parentId && blocks[parentId]?.schema) return
+        for (let p = parentId; p; p = blocks[p]?.parent_id ?? null) if (p === id) return
+        let rootPages = s.rootPages
+        if (b.parent_id) detach(blocks, id)
+        else rootPages = rootPages.filter((r) => r !== id)
+        const list = [...(parentId ? blocks[parentId].content : rootPages)]
+        const at = where === 'inside' ? list.length : list.indexOf(targetId) + (where === 'after' ? 1 : 0)
+        list.splice(at, 0, id)
+        if (parentId) touch(blocks, parentId, { content: list })
+        else rootPages = list
+        touch(blocks, id, { parent_id: parentId })
+        return { rootPages }
       }),
 
     movePage: (id, parentId) =>

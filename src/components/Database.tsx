@@ -3,7 +3,7 @@
 // values live in `properties.cells[propertyId]`.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { dbRows, OPTION_COLORS, PROPERTY_TYPES, shortId } from '../../shared/blocks.ts'
+import { cellRaw, dbRows, isSingleChoice, OPTION_COLORS, PROPERTY_TYPES, shortId, statusOptions } from '../../shared/blocks.ts'
 import { useStore } from '../store'
 import type { Block, CellValue, DbProperty, DbView, PropertyType, SelectOption } from '../types'
 
@@ -38,6 +38,7 @@ export function Popover({ anchor, onClose, children, width = 240 }: { anchor: DO
 export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block[]; view: DbView; onNewRow: () => void }) {
   const dbId = db.id
   const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
+  const [dropRow, setDropRow] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const S = useStore.getState
   const allColumns = db.schema!
   const schema = allColumns.filter((p) => p.type === 'title' || !view.hidden?.includes(p.id))
@@ -64,6 +65,27 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
               <th className="db-gutter" />
               {schema.map((p) => (
                 <th key={p.id}>
+                  <span
+                    className="db-col-resize"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      const x0 = e.clientX
+                      const w0 = defaultWidth(p)
+                      const th = e.currentTarget.closest('table')!.querySelectorAll('col')[schema.indexOf(p) + 1] as HTMLElement
+                      let w = w0
+                      const move = (m: MouseEvent) => {
+                        w = Math.max(60, Math.min(800, w0 + m.clientX - x0))
+                        th.style.width = `${w}px`
+                      }
+                      const up = () => {
+                        window.removeEventListener('mousemove', move)
+                        window.removeEventListener('mouseup', up)
+                        S().updateBlock(dbId, { schema: allColumns.map((c) => (c.id === p.id ? { ...c, width: w } : c)) })
+                      }
+                      window.addEventListener('mousemove', move)
+                      window.addEventListener('mouseup', up)
+                    }}
+                  />
                   <button className="db-th" onClick={(e) => setMenu({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })}>
                     <span className="db-type-icon">{TYPE_ICON[p.type]}</span>
                     <span className="db-th-name">{p.name}</span>
@@ -79,8 +101,32 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.id}>
+              <tr
+                key={row.id}
+                className={dropRow?.id === row.id ? `drop-${dropRow.pos}` : ''}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes('application/x-row')) return
+                  e.preventDefault()
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setDropRow({ id: row.id, pos: e.clientY < r.top + r.height / 2 ? 'before' : 'after' })
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const dragged = e.dataTransfer.getData('application/x-row')
+                  if (dragged && dragged !== row.id && dropRow) S().moveBlock(dragged, row.id, dropRow.pos)
+                  setDropRow(null)
+                }}
+              >
                 <td className="db-gutter">
+                  <span
+                    className="ctl db-row-drag"
+                    draggable
+                    title="Drag to reorder"
+                    onDragStart={(e) => e.dataTransfer.setData('application/x-row', row.id)}
+                    onDragEnd={() => setDropRow(null)}
+                  >
+                    ⋮⋮
+                  </span>
                   <button className="ctl db-row-del" title="Delete row" onClick={() => S().removeBlock(row.id)}>
                     🗑
                   </button>
@@ -209,6 +255,10 @@ export function Cell({ prop, row, dbId }: { prop: DbProperty; row: Block; dbId: 
           )}
         </div>
       )
+    case 'created_time':
+    case 'last_edited_time':
+      return <span className="db-readonly">{String(cellRaw(prop, row) ?? '')}</span>
+    case 'status':
     case 'select':
     case 'multi_select':
       return <SelectCell prop={prop} value={value} onChange={set} dbId={dbId} />
@@ -333,7 +383,7 @@ function convertCells(db: Block, prop: DbProperty, to: PropertyType): { options?
     if (v === undefined || v === null) continue
     // Current value as a list of words / names.
     const parts: string[] =
-      prop.type === 'select' ? [optionName(String(v)) ?? ''] :
+      isSingleChoice(prop.type) ? [optionName(String(v)) ?? ''] :
       prop.type === 'multi_select' ? (Array.isArray(v) ? v.map((id) => optionName(id) ?? '') : []) :
       prop.type === 'checkbox' ? [] :
       String(v).split(',').map((s) => s.trim())
@@ -343,11 +393,12 @@ function convertCells(db: Block, prop: DbProperty, to: PropertyType): { options?
     else if (to === 'number') next = Number.isNaN(parseFloat(text)) ? null : parseFloat(text)
     else if (to === 'checkbox') next = prop.type === 'checkbox' ? v : false
     else if (to === 'date') next = /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null
-    else if (to === 'select') next = parts[0] ? optionFor(parts[0]) : null
+    else if (to === 'select' || to === 'status') next = parts[0] ? optionFor(parts[0]) : null
     else if (to === 'multi_select') next = parts.filter(Boolean).map(optionFor)
     S().setCell(row.id, prop.id, next)
   }
-  return { options: to === 'select' || to === 'multi_select' ? options : undefined }
+  if (to === 'status' && !options.length) options.push(...statusOptions())
+  return { options: to === 'select' || to === 'status' || to === 'multi_select' ? options : undefined }
 }
 
 function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: string; anchor: DOMRect; onClose: () => void }) {
@@ -399,9 +450,9 @@ function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: stri
           ))}
         </>
       )}
-      {(prop.type === 'select' || prop.type === 'multi_select') && !!prop.options?.length && (
+      {(isSingleChoice(prop.type) || prop.type === 'multi_select') && !!prop.options?.length && (
         <>
-          <div className="menu-section">Options (click the dot to change colour)</div>
+          <div className="menu-section">Options (rename, or click the dot to change colour)</div>
           {prop.options.map((o) => (
             <div key={o.id} className="menu-item compact db-option-row">
               <button
@@ -412,7 +463,15 @@ function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: stri
                   updateProperty(db.id, propId, { options: prop.options!.map((x) => (x.id === o.id ? { ...x, color: next } : x)) })
                 }}
               />
-              <Pill option={o} />
+              <input
+                className="db-option-name"
+                defaultValue={o.name}
+                onBlur={(e) => {
+                  const n = e.target.value.trim()
+                  if (n && n !== o.name) updateProperty(db.id, propId, { options: prop.options!.map((x) => (x.id === o.id ? { ...x, name: n } : x)) })
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
               <span style={{ flex: 1 }} />
               <button
                 className="ctl"

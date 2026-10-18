@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import {
   caretAtStart,
   caretClientRect,
@@ -13,13 +13,18 @@ import { htmlToText, inlineMarkdownToHtml, markdownToBlocks, sanitizeHtml } from
 import { COLOR_NAMES } from '../../shared/blocks.ts'
 import { pageTitle, useStore, visibleOrder } from '../store'
 import type { Block, BlockColor, BlockType } from '../types'
+import { activeSelection, clearFormatting, toggle, toggleHighlight } from '../formatting'
+import { getSelectionOffsets, marksIn, parse, plainText, render, replaceText, setMark, setSelectionOffsets, type Mark } from '../richtext'
 import { AIInline } from './AIInline'
+import { DragIcon, PlusIcon, TriangleIcon } from './Icons'
 import { filterMenu, MENU_ITEMS, SlashMenu, type MenuItem } from './SlashMenu'
+import { Columns, MediaBlock, TableBlock, TableOfContents } from './SpecialBlocks'
 
 const PLACEHOLDER: Partial<Record<BlockType, string>> = {
   header: 'Heading 1',
   sub_header: 'Heading 2',
   sub_sub_header: 'Heading 3',
+  header_4: 'Heading 4',
   bulleted_list: 'List',
   numbered_list: 'List',
   to_do: 'To-do',
@@ -29,27 +34,85 @@ const PLACEHOLDER: Partial<Record<BlockType, string>> = {
   code: 'Code',
 }
 
+export const HEADINGS = new Set<BlockType>(['header', 'sub_header', 'sub_sub_header', 'header_4'])
 /** Types that keep their type when you press Enter (Notion behaviour). */
 const CONTINUES = new Set<BlockType>(['bulleted_list', 'numbered_list', 'to_do', 'toggle'])
-const NOT_EDITABLE = new Set<BlockType>(['divider', 'page'])
+const NOT_EDITABLE = new Set<BlockType>(['divider', 'page', 'image', 'video', 'embed', 'bookmark', 'table', 'table_row', 'table_of_contents', 'column_list', 'column'])
+const MEDIA = new Set<BlockType>(['image', 'video', 'embed', 'bookmark'])
+export const CODE_LANGUAGES = ['plain text', 'bash', 'c', 'c#', 'c++', 'css', 'go', 'html', 'java', 'javascript', 'json', 'kotlin', 'markdown', 'php', 'powershell', 'python', 'ruby', 'rust', 'sql', 'swift', 'typescript', 'yaml']
 
-/** Markdown shortcuts triggered by typing the prefix then Space. */
+/** Markdown shortcuts typed at the start of a line, then Space (Notion's list, analysis/app-map.md §4.1). */
 const SHORTCUTS: Record<string, BlockType> = {
   '#': 'header',
   '##': 'sub_header',
   '###': 'sub_sub_header',
+  '####': 'header_4',
   '-': 'bulleted_list',
   '*': 'bulleted_list',
   '+': 'bulleted_list',
-  '1.': 'numbered_list',
+  '•': 'bulleted_list',
   '[]': 'to_do',
+  '[ ]': 'to_do',
+  '[x]': 'to_do',
+  '[X]': 'to_do',
   '>': 'toggle',
   '"': 'quote',
+  '“': 'quote',
+  '|': 'quote',
+}
+
+/** Ctrl+Shift+0…9 (Cmd+Alt+0…9 on Mac): turn the block into… (9 = page). */
+const TURN_INTO_KEYS: (BlockType | 'page')[] = ['text', 'header', 'sub_header', 'sub_sub_header', 'to_do', 'bulleted_list', 'numbered_list', 'toggle', 'code', 'page']
+
+/** Inline Markdown applied when the closing delimiter is typed: **bold**, *italic*, ~strike~, `code`. */
+const INLINE_RULES: { re: RegExp; mark: Mark; d: number }[] = [
+  { re: /\*\*([^*\s](?:[^*]*[^*\s])?)\*\*$/, mark: 'b', d: 2 },
+  { re: /__([^_\s](?:[^_]*[^_\s])?)__$/, mark: 'b', d: 2 },
+  { re: /(?:^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*$/, mark: 'i', d: 1 },
+  { re: /(?:^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_$/, mark: 'i', d: 1 },
+  { re: /(?:^|[^~])~([^~\s](?:[^~]*[^~\s])?)~$/, mark: 's', d: 1 },
+  { re: /`([^`]+)`$/, mark: 'code', d: 1 },
+]
+
+/** Notion's typing replacements (em dash, arrows, ≥ ≤ ≠, ellipsis). Smart quotes are left out. */
+const REPLACEMENTS: [RegExp, number, string][] = [
+  [/<->$/, 3, '↔'],
+  [/←>$/, 2, '↔'],
+  [/--$/, 2, '—'],
+  [/->$/, 2, '→'],
+  [/=>$/, 2, '⇒'],
+  [/<-$/, 2, '←'],
+  [/>=$/, 2, '≥'],
+  [/<=$/, 2, '≤'],
+  [/!=$/, 2, '≠'],
+  [/\.\.\.$/, 3, '…'],
+]
+
+const toLetters = (n: number) => {
+  let s = ''
+  for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(97 + ((n - 1) % 26)) + s
+  return s
+}
+const toRoman = (n: number) => {
+  const t: [number, string][] = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]
+  let s = ''
+  for (const [v, r] of t) for (; n >= v; n -= v) s += r
+  return s
+}
+/** Notion cycles list markers by nesting depth: 1. a. i. / • ◦ ▪. */
+const NUMBER_FORMATS = ['numbers', 'letters', 'roman'] as const
+const BULLETS: Record<string, string> = { disc: '•', circle: '◦', square: '▪' }
+const BULLET_FORMATS = ['disc', 'circle', 'square'] as const
+
+export function listMarker(block: Block, number: number, depth: number): string {
+  if (block.type === 'bulleted_list') return BULLETS[block.format.list_format ?? BULLET_FORMATS[depth % 3]] ?? '•'
+  const f = block.format.list_format ?? NUMBER_FORMATS[depth % 3]
+  return (f === 'letters' ? toLetters(number) : f === 'roman' ? toRoman(number) : String(number)) + '.'
 }
 
 const CALLOUT_ICONS = ['💡', '⚠️', '📌', '✅', '❗', '🔥', 'ℹ️', '📝']
 
-export function BlockList({ ids, pageId }: { ids: string[]; pageId: string }) {
+export function BlockList({ ids, pageId, depth = 0 }: { ids: string[]; pageId: string; depth?: number }) {
   const blocks = useStore((s) => s.blocks)
   let n = 0
   return (
@@ -57,8 +120,9 @@ export function BlockList({ ids, pageId }: { ids: string[]; pageId: string }) {
       {ids.map((id) => {
         const b = blocks[id]
         if (!b?.alive) return null
-        n = b.type === 'numbered_list' ? n + 1 : 0
-        return <BlockView key={id} id={id} pageId={pageId} number={n} />
+        // A run of numbered items counts up from the first item's start number ("5. " starts at 5).
+        n = b.type === 'numbered_list' ? (n === 0 ? b.format.list_start_index ?? 1 : n + 1) : 0
+        return <BlockView key={id} id={id} pageId={pageId} number={n} depth={depth} />
       })}
     </>
   )
@@ -71,14 +135,31 @@ interface SlashState {
   rect: DOMRect
 }
 
-function BlockView({ id, pageId, number }: { id: string; pageId: string; number: number }) {
+function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; number: number; depth: number }) {
   const block = useStore((s) => s.blocks[id]) as Block
   const focus = useStore((s) => s.focus)
+  // "Lock page": text can still be read, selected and copied, and toggles opened — not edited.
+  const locked = useStore((s) => !!s.blocks[pageId]?.format.locked)
   const ref = useRef<HTMLDivElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
   const localHtml = useRef<string | null>(null)
   const pendingSlash = useRef<number | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [aiOpen, setAiOpen] = useState(false)
+  const [aiSelection, setAiSelection] = useState<{ start: number; end: number; text: string } | undefined>()
+
+  // "Ask AI" from the selection toolbar.
+  useEffect(() => {
+    const row = rowRef.current
+    if (!row) return
+    const open = (e: Event) => {
+      if ((e.target as HTMLElement) !== row) return
+      setAiSelection((e as CustomEvent).detail)
+      setAiOpen(true)
+    }
+    row.addEventListener('nre:ask-ai', open)
+    return () => row.removeEventListener('nre:ask-ai', open)
+  }, [])
   const [dropPos, setDropPos] = useState<'before' | 'after' | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -118,8 +199,63 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
     else if (dir === -1) document.querySelector<HTMLElement>('.page-title')?.focus()
   }
 
-  const onInput = () => {
+  // After "**bold**" turns bold, the next typed text must not be bold (Notion behaviour), but the
+  // browser would type inside the <b>. So the next insert at that spot is done by hand, unmarked.
+  const exitMark = useRef<{ at: number; mark: Mark } | null>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onBeforeInput = (e: InputEvent) => {
+      const pending = exitMark.current
+      exitMark.current = null
+      if (!pending || e.inputType !== 'insertText' || !e.data) return
+      const off = getSelectionOffsets(el)
+      if (!off || off.start !== off.end || off.start !== pending.at) return
+      e.preventDefault()
+      const segs = parse(el.innerHTML)
+      const marks = (pending.at > 0 ? marksIn(segs, pending.at - 1, pending.at) : []).filter((m) => m !== pending.mark)
+      el.innerHTML = render(replaceText(segs, pending.at, pending.at, e.data, marks))
+      setSelectionOffsets(el, pending.at + e.data.length)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    el.addEventListener('beforeinput', onBeforeInput)
+    return () => el.removeEventListener('beforeinput', onBeforeInput)
+  }, [block.type])
+
+  /** After a typed character: inline Markdown (**x**, `x`…) and Notion's replacements (-- → —). */
+  const autoFormat = (typed: string) => {
     const el = ref.current!
+    const off = getSelectionOffsets(el)
+    if (!off || off.start !== off.end) return
+    const at = off.start
+    let segs = parse(el.innerHTML)
+    if (at > 0 && marksIn(segs, at - 1, at).includes('code') && typed !== '`') return
+    const before = plainText(segs).slice(0, at)
+    for (const r of '*_~`'.includes(typed) ? INLINE_RULES : []) {
+      const m = before.match(r.re)
+      if (!m) continue
+      const innerEnd = at - r.d
+      const innerStart = innerEnd - m[1].length
+      segs = replaceText(segs, innerEnd, at, '')
+      segs = replaceText(segs, innerStart - r.d, innerStart, '')
+      segs = setMark(segs, innerStart - r.d, innerEnd - r.d, r.mark, true)
+      el.innerHTML = render(segs)
+      setSelectionOffsets(el, innerEnd - r.d)
+      exitMark.current = { at: innerEnd - r.d, mark: r.mark }
+      return
+    }
+    for (const [re, len, rep] of REPLACEMENTS) {
+      if (!re.test(before)) continue
+      segs = replaceText(segs, at - len, at, rep)
+      el.innerHTML = render(segs)
+      setSelectionOffsets(el, at - len + rep.length)
+      return
+    }
+  }
+
+  const onInput = (ev?: InputEvent) => {
+    const el = ref.current!
+    if (!isCode && ev?.inputType === 'insertText' && ev.data && '*_~`->=.'.includes(ev.data.slice(-1))) autoFormat(ev.data.slice(-1))
     const text = el.textContent ?? ''
 
     if (!isCode && text === '```') {
@@ -173,7 +309,27 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       openPage(pid)
       return
     }
-    const type = item.key
+    if (item.key.startsWith('columns_')) {
+      const n = +item.key.slice(8)
+      const cols = Array.from({ length: n }, () => ({ type: 'column' as const, children: [{ type: 'text' as const }] }))
+      const cl = S().insertTree({ after: id }, { type: 'column_list', children: cols })
+      if (empty && block.type === 'text') removeBlock(id)
+      const first = S().blocks[S().blocks[cl].content[0]].content[0]
+      return requestFocus({ id: first, at: 'start' })
+    }
+    if (item.key === 'table') {
+      const row = { type: 'table_row' as const, properties: { row: ['', '', ''] } }
+      S().insertTree({ after: id }, { type: 'table', format: { table_width: 3 }, children: [row, row, row] })
+      if (empty && block.type === 'text') removeBlock(id)
+      return
+    }
+    const type = item.key as BlockType
+    if (NOT_EDITABLE.has(type)) {
+      // Media / table of contents: a new block below (or in place of an empty line).
+      S().insertTree({ after: id }, { type })
+      if (empty && block.type === 'text') removeBlock(id)
+      return
+    }
     let target = id
     if (empty) setType(id, type)
     else target = insertBlock({ after: id, type })
@@ -207,6 +363,62 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       }
     }
 
+    const mod = e.ctrlKey || e.metaKey
+    const key = e.key.toLowerCase()
+
+    // ---- text formatting (selection) ----
+    if (mod && !isCode) {
+      const sel = activeSelection()
+      const fmt = (fn: () => void) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (sel) fn()
+      }
+      if (!e.shiftKey && !e.altKey && (key === 'b' || key === 'i' || key === 'u') && sel) return fmt(() => toggle(sel, key as 'b'))
+      if (!e.shiftKey && !e.altKey && key === 'e') return fmt(() => toggle(sel!, 'code'))
+      if (e.shiftKey && !e.altKey && (key === 's' || key === 'x')) return fmt(() => toggle(sel!, 's'))
+      if (e.shiftKey && !e.altKey && key === 'h') return fmt(() => toggleHighlight(sel!))
+      if (e.altKey && (e.key === '\\' || e.code === 'Backslash')) return fmt(() => clearFormatting(sel!))
+      if (!e.shiftKey && !e.altKey && key === 'k' && sel) {
+        e.preventDefault()
+        e.stopPropagation()
+        window.dispatchEvent(new Event('nre:link'))
+        return
+      }
+    }
+
+    // ---- block commands ----
+    if (mod && !e.shiftKey && !e.altKey && key === 'd') {
+      e.preventDefault()
+      const copy = store.duplicate(id)
+      store.requestFocus({ id: copy, at: 'end' })
+      return
+    }
+    if (mod && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault()
+      const at = caretOffset(el)
+      const siblings = store.blocks[block.parent_id!]?.content.filter((c) => store.blocks[c]?.alive) ?? []
+      const i = siblings.indexOf(id)
+      const target = siblings[i + (e.key === 'ArrowUp' ? -1 : 1)]
+      if (target) store.moveBlock(id, target, e.key === 'ArrowUp' ? 'before' : 'after')
+      store.requestFocus({ id, at })
+      return
+    }
+    // Ctrl+Shift+0…9 (Windows/Linux) · Cmd+Alt+0…9 (Mac): turn into.
+    const digit = /^Digit(\d)$/.exec(e.code)?.[1]
+    if (digit && mod && (e.metaKey ? e.altKey : e.shiftKey && !e.altKey)) {
+      e.preventDefault()
+      const to = TURN_INTO_KEYS[+digit]
+      if (to === 'page') {
+        save()
+        store.turnIntoPage(id)
+        return
+      }
+      if (to !== block.type) store.setType(id, to)
+      store.requestFocus({ id, at: caretOffset(el) })
+      return
+    }
+
     if (e.key === '/' && !isCode) {
       pendingSlash.current = caretOffset(el)
       return
@@ -221,15 +433,30 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
         setAiOpen(true)
         return
       }
-      const type = SHORTCUTS[before]
-      if (type && type !== block.type) {
+      const convert = (type: BlockType, format?: Partial<Block['format']>, checked?: boolean) => {
         e.preventDefault()
         deleteTextRange(el, 0, offset)
         save()
-        store.setType(id, type)
+        if (type !== block.type) store.setType(id, type)
+        if (format) store.updateBlock(id, { format })
+        if (checked) store.updateBlock(id, { properties: { checked: true } })
         store.requestFocus({ id, at: 'start' })
-        return
       }
+      // "# " then "> " → toggle heading.
+      if (before === '>' && HEADINGS.has(block.type) && !block.format.toggleable) return convert(block.type, { toggleable: true })
+      const type = SHORTCUTS[before]
+      if (type && (type !== block.type || before.startsWith('[x') || before.startsWith('[X'))) {
+        if (block.type === 'code' || (type === 'quote' && block.type === 'callout')) return
+        return convert(type, undefined, /^\[[xX]\]$/.test(before))
+      }
+      // Numbered lists: "1." "1)" (any number sets the start), "a." letters, "i." roman numerals.
+      const num = /^(\d+)[.)]$/.exec(before)
+      if (num && block.type !== 'numbered_list') {
+        const start = parseInt(num[1], 10)
+        return convert('numbered_list', start !== 1 ? { list_start_index: start } : undefined)
+      }
+      if (/^[aA][.)]$/.test(before) && block.type !== 'numbered_list') return convert('numbered_list', { list_format: 'letters' })
+      if (/^[iI][.)]$/.test(before) && block.type !== 'numbered_list') return convert('numbered_list', { list_format: 'roman' })
     }
 
     if (e.key === 'Enter' && isCode) {
@@ -249,6 +476,13 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       e.preventDefault()
       const text = el.textContent ?? ''
       if (!text && block.type !== 'text') {
+        // Empty nested list item: move out one level first; at the top level it becomes text.
+        const parent = store.blocks[block.parent_id!]
+        if (CONTINUES.has(block.type) && parent && parent.type !== 'page' && parent.type !== 'column') {
+          store.outdent(id)
+          store.requestFocus({ id, at: 'start' })
+          return
+        }
         store.setType(id, 'text')
         return
       }
@@ -256,7 +490,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       const cleanBefore = sanitizeHtml(before)
       store.updateBlock(id, { properties: { title: cleanBefore } })
       const type = CONTINUES.has(block.type) ? block.type : 'text'
-      const hasOpenChildren = block.content.some((c) => store.blocks[c]?.alive) && !(block.type === 'toggle' && block.format.collapsed)
+      const hasOpenChildren = block.content.some((c) => store.blocks[c]?.alive) && !(isToggle && block.format.collapsed)
       const next = hasOpenChildren
         ? store.insertBlock({ parent: id, index: 0, type, title: sanitizeHtml(after) })
         : store.insertBlock({ after: id, type, title: sanitizeHtml(after) })
@@ -280,6 +514,14 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
         return
       }
       if (prev.type === 'page') return focusSibling(-1, 'end')
+      if (NOT_EDITABLE.has(prev.type) || (prev.parent_id !== block.parent_id && store.blocks[prev.parent_id!]?.type === 'column')) {
+        // Can't merge text into an image, table or column: just drop this line if it's empty.
+        if (!block.properties.title && !block.content.length) {
+          store.removeBlock(id)
+          focusSibling(-1, 'end')
+        }
+        return
+      }
       const prevLen = htmlToText(prev.properties.title).length
       const merged = prev.type === 'code' ? prev.properties.title + (el.textContent ?? '') : prev.properties.title + block.properties.title
       store.updateBlock(prevId, { properties: { title: merged } })
@@ -351,25 +593,26 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
     <div
       ref={ref}
       className="editable"
-      contentEditable={isCode ? 'plaintext-only' : true}
+      contentEditable={locked ? false : isCode ? 'plaintext-only' : true}
       suppressContentEditableWarning
       spellCheck={!isCode}
       data-placeholder={PLACEHOLDER[block.type] ?? "Type '/' for commands, or space for AI…"}
       // One key press / input = at most one undo step, even when it does several edits.
-      onInput={() => S().transact(onInput)}
+      onInput={(e) => S().transact(() => onInput(e.nativeEvent as InputEvent))}
       onKeyDown={(e) => S().transact(() => onKeyDown(e))}
       onPaste={onPaste}
       onBlur={() => setTimeout(() => setSlash(null), 150)}
     />
   )
 
+  const isToggle = block.type === 'toggle' || (HEADINGS.has(block.type) && !!block.format.toggleable)
   let prefix: React.ReactNode = null
   switch (block.type) {
     case 'bulleted_list':
-      prefix = <span className="bullet">•</span>
+      prefix = <span className="bullet">{listMarker(block, number, depth)}</span>
       break
     case 'numbered_list':
-      prefix = <span className="bullet num">{number}.</span>
+      prefix = <span className="bullet num">{listMarker(block, number, depth)}</span>
       break
     case 'to_do':
       prefix = (
@@ -377,18 +620,24 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
           type="checkbox"
           className="todo-check"
           checked={!!block.properties.checked}
+          disabled={locked}
           onChange={(e) => S().updateBlock(id, { properties: { checked: e.target.checked } })}
         />
       )
       break
     case 'toggle':
+    case 'header':
+    case 'sub_header':
+    case 'sub_sub_header':
+    case 'header_4':
+      if (!isToggle) break
       prefix = (
         <button
           className={`toggle-arrow ${block.format.collapsed ? '' : 'open'}`}
           onClick={() => S().updateBlock(id, { format: { collapsed: !block.format.collapsed } })}
-          aria-label="Toggle"
+          aria-label={block.format.collapsed ? 'Open' : 'Close'}
         >
-          ▶
+          <TriangleIcon />
         </button>
       )
       break
@@ -408,46 +657,57 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       break
   }
 
-  const showChildren =
-    block.type !== 'page' && block.content.length > 0 && !(block.type === 'toggle' && block.format.collapsed)
+  const showChildren = block.type !== 'page' && !NOT_EDITABLE.has(block.type) && block.content.length > 0 && !(isToggle && block.format.collapsed)
 
   return (
     <div
-      className={`block-row type-${block.type} ${block.format.color ? `color-${block.format.color}` : ''} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''}`}
+      ref={rowRef}
+      className={`block-row type-${block.type} ${isToggle ? 'is-toggle' : ''} ${block.format.quote_size === 'large' ? 'quote-large' : ''} ${block.format.color ? `color-${block.format.color}` : ''} ${block.properties.checked ? 'checked' : ''} ${dropPos ? `drop-${dropPos}` : ''}`}
       data-block-id={id}
       onDragOver={onDragOver}
       onDragLeave={() => setDropPos(null)}
       onDrop={onDrop}
     >
       <div className="block-main">
-        <div className="block-controls">
+        <div className="block-controls" hidden={locked}>
           <button
             className="ctl"
-            title="Add block below"
-            onClick={() => {
-              const next = S().insertBlock({ after: id })
+            title={'Click to add below\nAlt-click to add above'}
+            onClick={(e) => {
+              const parent = S().blocks[id].parent_id!
+              const next = e.altKey
+                ? S().insertBlock({ parent, index: S().blocks[parent].content.indexOf(id) })
+                : S().insertBlock({ after: id })
               S().requestFocus({ id: next, at: 'start' })
             }}
           >
-            +
+            <PlusIcon />
           </button>
           <span
             className="ctl handle"
             draggable
-            title="Drag to move · click for options"
+            title={'Drag to move\nClick to open menu'}
             onDragStart={(e) => {
               e.dataTransfer.setData('application/x-block', id)
               e.dataTransfer.effectAllowed = 'move'
             }}
             onClick={() => setMenuOpen((o) => !o)}
           >
-            ⋮⋮
+            <DragIcon />
           </span>
           {menuOpen && <BlockMenu id={id} onClose={() => setMenuOpen(false)} />}
         </div>
 
         {block.type === 'divider' ? (
           <hr className="divider" />
+        ) : MEDIA.has(block.type) ? (
+          <MediaBlock block={block} locked={locked} />
+        ) : block.type === 'table' ? (
+          <TableBlock block={block} locked={locked} />
+        ) : block.type === 'table_of_contents' ? (
+          <TableOfContents pageId={pageId} />
+        ) : block.type === 'column_list' ? (
+          <Columns block={block} pageId={pageId} locked={locked} />
         ) : block.type === 'page' ? (
           <div className="page-link" onClick={() => S().openPage(id)}>
             <span>{block.format.icon ?? '📄'}</span>
@@ -456,12 +716,51 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
         ) : (
           <div className="block-body">
             {prefix}
-            {isCode ? <pre className="code-wrap">{editable}</pre> : editable}
+            {isCode ? (
+              <div className="code-block">
+                <div className="code-bar">
+                  <select
+                    value={block.format.code_language ?? 'plain text'}
+                    disabled={locked}
+                    onChange={(e) => S().updateBlock(id, { format: { code_language: e.target.value === 'plain text' ? undefined : e.target.value } })}
+                  >
+                    {CODE_LANGUAGES.map((l) => (
+                      <option key={l}>{l}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-ghost small"
+                    onClick={(e) => {
+                      const b = e.currentTarget
+                      navigator.clipboard.writeText(block.properties.title)
+                      b.textContent = 'Copied!'
+                      setTimeout(() => (b.textContent = 'Copy'), 1200)
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre className="code-wrap">{editable}</pre>
+              </div>
+            ) : (
+              editable
+            )}
           </div>
         )}
       </div>
 
-      {aiOpen && <AIInline blockId={id} pageId={pageId} onClose={() => { setAiOpen(false); S().requestFocus({ id, at: 'end' }) }} />}
+      {aiOpen && (
+        <AIInline
+          blockId={id}
+          pageId={pageId}
+          selection={aiSelection}
+          onClose={() => {
+            setAiOpen(false)
+            setAiSelection(undefined)
+            S().requestFocus({ id, at: 'end' })
+          }}
+        />
+      )}
       {slash && (
         <SlashMenu
           items={filterMenu(slash.query)}
@@ -473,10 +772,10 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
       )}
       {showChildren && (
         <div className="block-children">
-          <BlockList ids={block.content} pageId={pageId} />
+          <BlockList ids={block.content} pageId={pageId} depth={depth + 1} />
         </div>
       )}
-      {block.type === 'toggle' && !block.format.collapsed && block.content.length === 0 && (
+      {isToggle && !block.format.collapsed && !block.content.some((c) => S().blocks[c]?.alive) && (
         <div
           className="toggle-empty"
           onClick={() => {
@@ -484,7 +783,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
             S().requestFocus({ id: c, at: 'start' })
           }}
         >
-          Empty toggle. Click to add a block inside.
+          {block.type === 'toggle' ? 'Empty toggle. Click or drop blocks inside.' : 'Empty toggle heading. Click or drop blocks inside.'}
         </div>
       )}
     </div>
@@ -494,7 +793,7 @@ function BlockView({ id, pageId, number }: { id: string; pageId: string; number:
 function BlockMenu({ id, onClose }: { id: string; onClose: () => void }) {
   const S = useStore.getState
   const isPage = S().blocks[id]?.type === 'page'
-  const turnInto = isPage ? [] : MENU_ITEMS.filter((i) => i.key !== 'ai' && i.key !== 'page' && i.key !== 'database')
+  const turnInto = isPage || NOT_EDITABLE.has(S().blocks[id]?.type) ? [] : MENU_ITEMS.filter((i) => !['ai', 'page', 'database'].includes(i.key) && !NOT_EDITABLE.has(i.key as BlockType) && !i.key.startsWith('columns_'))
   const color = S().blocks[id]?.format.color
   const setColor = (c: BlockColor | undefined) => {
     S().updateBlock(id, { format: { color: c } })

@@ -8,9 +8,9 @@ export {
   pageToMarkdown,
   type BlockSpec,
 } from '../shared/blocks.ts'
-import { escapeHtml } from '../shared/blocks.ts'
+import { BLOCK_COLORS, escapeHtml } from '../shared/blocks.ts'
 
-const ALLOWED = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'CODE', 'A', 'BR'])
+const ALLOWED = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'CODE', 'A', 'BR', 'SPAN'])
 
 /** Keep only simple inline formatting; strip everything else (scripts, styles, attributes). */
 export function sanitizeHtml(html: string): string {
@@ -23,6 +23,11 @@ export function sanitizeHtml(html: string): string {
     if (!ALLOWED.has(el.tagName)) return inner
     const tag = { STRONG: 'b', EM: 'i', STRIKE: 's' }[el.tagName] ?? el.tagName.toLowerCase()
     if (tag === 'br') return '<br>'
+    if (tag === 'span') {
+      // Inline text colour / highlight only (`data-color="red"` or `"red_background"`).
+      const c = el.getAttribute('data-color') ?? ''
+      return (BLOCK_COLORS as string[]).includes(c) && inner ? `<span data-color="${c}">${inner}</span>` : inner
+    }
     if (tag === 'a') {
       const href = el.getAttribute('href') ?? ''
       if (!/^(https?:|mailto:)/i.test(href)) return inner

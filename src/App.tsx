@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { AIPanel } from './components/AIPanel'
 import { SearchModal, SettingsModal, TrashModal } from './components/Modals'
 import { HistoryModal } from './components/HistoryModal'
-import { PageMenu } from './components/PageMenu'
+import { copyPageLink, MovePageModal, PageMenu, toggleFavorite } from './components/PageMenu'
 import { PageView } from './components/PageView'
 import { Sidebar } from './components/Sidebar'
+import { FormatToolbar } from './components/FormatToolbar'
 import { pagePath, pageTitle, useStore } from './store'
+import { toggleTheme } from './theme'
 
 type ModalKind = 'search' | 'settings' | 'trash' | null
 
@@ -18,6 +20,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const announcement = useStore((s) => s.announcement)
 
   useEffect(() => {
@@ -28,6 +31,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
+      if (e.defaultPrevented) return
       // Undo / redo for the workspace. Text boxes (AI prompt, database cells) keep their own.
       const inTextBox = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
       if (mod && !e.altKey && !inTextBox && (key === 'z' || key === 'y')) {
@@ -36,15 +40,45 @@ export default function App() {
         else useStore.getState().undo()
         return
       }
-      if (mod && e.key.toLowerCase() === 'k') {
+      const S = useStore.getState()
+      // Notion: Ctrl+K adds a link to selected text (handled in the block) or opens search; Ctrl+P searches.
+      if (mod && !e.shiftKey && !e.altKey && (key === 'k' || key === 'p')) {
         e.preventDefault()
         setModal('search')
-      } else if (mod && e.key.toLowerCase() === 'j') {
+      } else if (mod && !e.altKey && (key === 'j' || key === ';')) {
         e.preventDefault()
         setAiOpen((o) => !o)
-      } else if (mod && e.key === '\\') {
+      } else if (mod && !e.shiftKey && !e.altKey && e.key === '\\') {
         e.preventDefault()
         setSidebarOpen((o) => !o)
+      } else if (mod && e.shiftKey && !e.altKey && key === 'l') {
+        e.preventDefault()
+        toggleTheme()
+      } else if (mod && !e.shiftKey && !e.altKey && key === 'n') {
+        // Ctrl+N is "new window" in the browser; the desktop app lets us take it.
+        e.preventDefault()
+        S.createPage(null)
+      } else if (mod && !e.shiftKey && !e.altKey && e.key === ',') {
+        e.preventDefault()
+        setModal('settings')
+      } else if (mod && e.altKey && key === 't' && S.currentPageId) {
+        e.preventDefault()
+        S.toggleAll(S.currentPageId)
+      } else if (mod && e.shiftKey && !e.altKey && key === 'u' && S.currentPageId) {
+        e.preventDefault()
+        const parent = pagePath(S.blocks, S.currentPageId).at(-2)
+        if (parent) S.openPage(parent.id)
+      } else if (mod && !e.shiftKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+        // Back / forward through the pages you visited.
+        e.preventDefault()
+        if (e.key === '[') history.back()
+        else history.forward()
+      } else if (mod && !e.shiftKey && !e.altKey && key === 'l' && S.currentPageId) {
+        e.preventDefault()
+        copyPageLink(S.currentPageId)
+      } else if (mod && e.shiftKey && !e.altKey && key === 'p' && S.currentPageId) {
+        e.preventDefault()
+        setMoveOpen(true)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -86,9 +120,19 @@ export default function App() {
           </div>
           <span style={{ flex: 1 }} />
           {page && !page.alive && <span className="trash-banner">This page is in the trash</span>}
+          {page?.format.locked && (
+            <button className="lock-pill" title={'Locked to prevent accidental editing.\nClick to unlock'} onClick={() => useStore.getState().updateBlock(page.id, { format: { locked: undefined } })}>
+              🔒 Locked
+            </button>
+          )}
           {page && <span className="muted small">Edited {new Date(page.last_edited_time).toLocaleString()}</span>}
           <button className="btn-ghost" onClick={() => setAiOpen(!aiOpen)} title="AI assistant (Ctrl+J)">✨ AI</button>
-          {page && <button className="btn-ghost" onClick={() => setPageMenuOpen(true)} title="Page style">⋯</button>}
+          {page && (
+            <button className={`btn-ghost fav-star ${page.format.favorite ? 'on' : ''}`} onClick={() => toggleFavorite(page.id)} title={page.format.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
+              {page.format.favorite ? '★' : '☆'}
+            </button>
+          )}
+          {page && <button className="btn-ghost" onClick={() => setPageMenuOpen(true)} title="Style, export, and more">⋯</button>}
         </header>
         <div className="scroll">
           {page ? (
@@ -103,9 +147,11 @@ export default function App() {
       </main>
       {aiOpen && <AIPanel onClose={() => setAiOpen(false)} onSettings={() => setModal('settings')} />}
 
-      {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} onHistory={() => setHistoryOpen(true)} />}
+      {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} onHistory={() => setHistoryOpen(true)} onMove={() => setMoveOpen(true)} />}
+      {moveOpen && page && <MovePageModal pageId={page.id} onClose={() => setMoveOpen(false)} />}
       {historyOpen && page && <HistoryModal pageId={page.id} onClose={() => setHistoryOpen(false)} />}
       <Toast />
+      <FormatToolbar />
       <div className="sr-only" aria-live="polite">{announcement}</div>
       {modal === 'search' && <SearchModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { pageTitle, useStore } from '../store'
+import { TriangleIcon } from './Icons'
 
 interface Props {
   onSearch: () => void
@@ -12,6 +13,11 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
   const rootPages = useStore((s) => s.rootPages)
   const blocks = useStore((s) => s.blocks)
   const createPage = useStore((s) => s.createPage)
+  // Favorites: every live page with the star, by title (when it was starred is not stored).
+  const favorites = Object.values(blocks)
+    .filter((b) => b.type === 'page' && b.alive && b.format.favorite)
+    .sort((a, b) => pageTitle(a).localeCompare(pageTitle(b)))
+    .map((b) => b.id)
 
   return (
     <aside className="sidebar">
@@ -30,6 +36,19 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
           <span className="side-ic">⚙️</span> Settings
         </button>
       </nav>
+
+      {favorites.length > 0 && (
+        <>
+          <div className="side-section">
+            <span>Favorites</span>
+          </div>
+          <div className="tree tree-favorites">
+            {favorites.map((id) => (
+              <TreeItem key={id} id={id} depth={0} />
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="side-section">
         <span>Private</span>
@@ -75,16 +94,20 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={() => S().openPage(id)}
       >
+        {/* Like Notion: the page icon turns into the expand arrow while you hover the row. */}
         <button
           className="tree-arrow"
+          aria-label={open ? 'Collapse' : 'Expand'}
           onClick={(e) => {
             e.stopPropagation()
             setOpen(!open)
           }}
         >
-          <span className={open ? 'open' : ''}>▶</span>
+          <span className="tree-icon">{page.format.icon ?? '📄'}</span>
+          <span className={`tree-tri ${open ? 'open' : ''}`}>
+            <TriangleIcon />
+          </span>
         </button>
-        <span className="tree-icon">{page.format.icon ?? '📄'}</span>
         <span className="tree-title">{pageTitle(page)}</span>
         <span className="tree-actions">
           <button

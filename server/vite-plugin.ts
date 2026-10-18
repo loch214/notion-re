@@ -53,6 +53,39 @@ function setup(root: string, middlewares: Connect.Server) {
     json(res, 200, loadWorkspace(file))
   })
 
+  // Uploaded images / videos / files: saved under data/files, served back by name.
+  const filesDir = path.resolve(root, 'data', 'files')
+  const TYPES: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+    mp4: 'video/mp4', webm: 'video/webm', pdf: 'application/pdf',
+  }
+  middlewares.use('/api/files', async (req, res) => {
+    if (req.method === 'GET') {
+      const name = path.basename(decodeURIComponent((req.url ?? '').slice(1)))
+      const ext = name.split('.').pop()!.toLowerCase()
+      const p = path.join(filesDir, name)
+      if (!fs.existsSync(p)) return json(res, 404, { error: 'Not found' })
+      // SVGs can carry scripts: serve them so the browser won't run any.
+      res.writeHead(200, { 'content-type': TYPES[ext] ?? 'application/octet-stream', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'", 'x-content-type-options': 'nosniff' })
+      return void fs.createReadStream(p).pipe(res)
+    }
+    if (req.method !== 'POST') return json(res, 405, { error: 'GET or POST' })
+    if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin write refused' })
+    const ext = String(req.headers['x-file-ext'] ?? '').toLowerCase()
+    if (!TYPES[ext]) return json(res, 400, { error: 'Unsupported file type' })
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const c of req) {
+      size += c.length
+      if (size > 50 * 1024 * 1024) return json(res, 413, { error: 'File too large (max 50 MB)' })
+      chunks.push(c)
+    }
+    fs.mkdirSync(filesDir, { recursive: true })
+    const name = `${crypto.randomUUID().slice(0, 12)}.${ext}`
+    fs.writeFileSync(path.join(filesDir, name), Buffer.concat(chunks))
+    json(res, 200, { url: `/api/files/${name}` })
+  })
+
   middlewares.use('/api/sync', async (req, res) => {
     if (req.method !== 'POST') return json(res, 405, { error: 'POST only' })
     if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin write refused' })

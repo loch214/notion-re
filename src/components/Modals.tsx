@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { activeModel, claudeStatus, PROVIDERS, streamChat, type ClaudeStatus } from '../ai'
 import { htmlToText } from '../markdown'
-import { pagePath, pageTitle, useStore } from '../store'
+import { pagePath, pageTitle, START_PAGE_KEY, useStore } from '../store'
+import { setThemePref, useThemePref, type ThemePref } from '../theme'
 import type { AIProvider, AISettings } from '../types'
 
 function Modal({ title, onClose, children, wide }: { title?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
@@ -17,6 +18,45 @@ function Modal({ title, onClose, children, wide }: { title?: string; onClose: ()
         {children}
       </div>
     </div>
+  )
+}
+
+/** Your own settings: look and which page opens when the app starts. */
+function Preferences() {
+  const theme = useThemePref()
+  const blocks = useStore((st) => st.blocks)
+  const rootPages = useStore((st) => st.rootPages)
+  const [start, setStart] = useState(() => localStorage.getItem(START_PAGE_KEY) ?? '')
+  const pages = rootPages.filter((id) => blocks[id]?.alive)
+  return (
+    <>
+      <label className="field">
+        Appearance
+        <select value={theme} onChange={(e) => setThemePref(e.target.value as ThemePref)}>
+          <option value="system">Use system setting</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label className="field">
+        Open on start
+        <select
+          value={start}
+          onChange={(e) => {
+            setStart(e.target.value)
+            localStorage.setItem(START_PAGE_KEY, e.target.value)
+          }}
+        >
+          <option value="">Last visited page</option>
+          {pages.map((id) => (
+            <option key={id} value={id}>
+              {blocks[id].format.icon ? `${blocks[id].format.icon} ` : ''}
+              {pageTitle(blocks[id])}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
   )
 }
 
@@ -48,7 +88,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Settings · AI" onClose={onClose}>
+    <Modal title="Settings" onClose={onClose}>
+      <Preferences />
+      <div className="modal-title" style={{ marginTop: 22 }}>AI</div>
       <p className="muted small">
         Notion(RE) calls your AI provider directly from this browser. Keys are stored only in this browser's local
         database and are never uploaded anywhere else.

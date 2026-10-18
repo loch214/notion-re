@@ -19,3 +19,6 @@ plan.md
 resume.md
 NEXT-SESSION-PROMPT.md
 .claude/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

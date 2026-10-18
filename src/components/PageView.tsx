@@ -32,6 +32,7 @@ export function PageView({ pageId }: { pageId: string }) {
   const isDb = !!page.schema
   const cover = coverCss(page.format.cover)
   const f = page.format
+  const locked = !!f.locked
 
   const addBlockAtEnd = () => {
     const last = alive[alive.length - 1]
@@ -46,10 +47,10 @@ export function PageView({ pageId }: { pageId: string }) {
   }
 
   return (
-    <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''}`}>
+    <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''} ${f.small_text ? 'small-text' : ''} ${locked ? 'locked' : ''}`}>
       {cover && (
         <div className="cover" style={{ background: cover }}>
-          <div className="cover-actions">
+          <div className="cover-actions" hidden={locked}>
             <button
               className="btn small"
               onClick={() => {
@@ -72,6 +73,7 @@ export function PageView({ pageId }: { pageId: string }) {
           <button
             className="page-icon"
             title="Change icon (right-click to remove)"
+            disabled={locked}
             onClick={() => {
               const i = ICONS.indexOf(page.format.icon!)
               S().updateBlock(pageId, { format: { icon: ICONS[(i + 1) % ICONS.length] } })
@@ -84,7 +86,7 @@ export function PageView({ pageId }: { pageId: string }) {
             {page.format.icon}
           </button>
         )}
-        <div className="page-meta-actions">
+        <div className="page-meta-actions" hidden={locked}>
           {!page.format.icon && (
             <button className="btn-ghost" onClick={() => S().updateBlock(pageId, { format: { icon: ICONS[Math.floor(Math.random() * ICONS.length)] } })}>
               ☺ Add icon
@@ -99,7 +101,7 @@ export function PageView({ pageId }: { pageId: string }) {
         <div
           ref={titleRef}
           className="page-title"
-          contentEditable="plaintext-only"
+          contentEditable={locked ? false : 'plaintext-only'}
           suppressContentEditableWarning
           data-placeholder="Untitled"
           onInput={(e) => S().updateBlock(pageId, { properties: { title: e.currentTarget.textContent ?? '' } })}
@@ -125,7 +127,7 @@ export function PageView({ pageId }: { pageId: string }) {
             <div className="blocks">
               <BlockList ids={page.content} pageId={pageId} />
             </div>
-            <div className="page-tail" onClick={addBlockAtEnd} />
+            <div className="page-tail" onClick={locked ? undefined : addBlockAtEnd} />
           </>
         )}
       </div>

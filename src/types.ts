@@ -7,6 +7,7 @@ export type BlockType =
   | 'header'
   | 'sub_header'
   | 'sub_sub_header'
+  | 'header_4'
   | 'bulleted_list'
   | 'numbered_list'
   | 'to_do'
@@ -15,6 +16,19 @@ export type BlockType =
   | 'callout'
   | 'divider'
   | 'code'
+  | 'equation'
+  | 'table_of_contents'
+  | 'breadcrumb'
+  | 'link_to_page'
+  | 'image'
+  | 'bookmark'
+  | 'embed'
+  | 'video'
+  | 'file'
+  | 'column_list'
+  | 'column'
+  | 'table'
+  | 'table_row'
 
 export interface Block {
   id: string
@@ -27,6 +41,16 @@ export interface Block {
     checked?: boolean
     /** Database rows only: cell values keyed by property id (the title column is `title` above). */
     cells?: Record<string, CellValue>
+    /** Media / bookmark / embed: the source URL (https, or a data: URL for uploaded images). */
+    url?: string
+    /** Media / code: caption under the block (inline HTML). */
+    caption?: string
+    /** link_to_page: the page it points to. */
+    page_id?: string
+    /** table_row: one inline-HTML cell per table column. */
+    row?: string[]
+    /** bookmark: preview fetched for the link. */
+    bookmark?: { title?: string; description?: string; icon?: string; image?: string }
   }
   format: {
     icon?: string
@@ -40,6 +64,32 @@ export interface Block {
     full_width?: boolean
     /** Pages only: soft tint behind the whole page. */
     background?: ColorName
+    /** Pages only: Notion's "Small text" switch. */
+    small_text?: boolean
+    /** Pages only: "Lock page" — no edits until unlocked. */
+    locked?: boolean
+    /** Pages only: shown in the sidebar's Favorites section. */
+    favorite?: boolean
+    /** Headings only: a toggle heading (children hide when collapsed). */
+    toggleable?: boolean
+    /** Numbered lists: numbers / letters / roman. Bulleted lists: disc / circle / square. */
+    list_format?: 'numbers' | 'letters' | 'roman' | 'disc' | 'circle' | 'square'
+    /** Numbered lists: first number of the list (typing "5. " starts at 5). */
+    list_start_index?: number
+    /** Quotes: Notion's "Quote size → Large". */
+    quote_size?: 'large'
+    /** Code blocks. */
+    code_language?: string
+    code_wrap?: boolean
+    /** Media: width in px (missing = natural / full width) and alignment. */
+    block_width?: number
+    block_alignment?: 'left' | 'center' | 'right'
+    /** Columns: share of the row's width (all columns of a row add up to 1). */
+    column_ratio?: number
+    /** Simple tables: number of columns, header row / header column. */
+    table_width?: number
+    table_header_row?: boolean
+    table_header_column?: boolean
   }
   /** Present on a page that is a database: its columns, in display order. Rows are its child pages. */
   schema?: DbProperty[]
@@ -56,7 +106,7 @@ export type OptionColor = 'default' | 'gray' | 'brown' | 'orange' | 'yellow' | '
 
 export type ColorName = Exclude<OptionColor, 'default'>
 export type BlockColor = ColorName | `${ColorName}_background`
-export type PageFont = 'default' | 'serif' | 'mono'
+export type PageFont = 'default' | 'serif' | 'mono' | 'comic'
 
 export interface SelectOption {
   id: string

@@ -4,7 +4,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Workspace } from '../shared/blocks.ts'
+import { normalizeRoots, type Workspace } from '../shared/blocks.ts'
 import type { Block } from '../src/types.ts'
 
 export function loadWorkspace(file: string): Workspace | null {
@@ -39,5 +39,5 @@ export function applySync(ws: Workspace | null, p: SyncPayload): Workspace {
   for (const id of p.deleted) delete blocks[id]
   // Keep the client's page order, plus any top-level pages only the server knows about.
   const roots = [...p.rootPages, ...(ws?.rootPages ?? []).filter((id) => !p.rootPages.includes(id))]
-  return { blocks, rootPages: roots.filter((id) => blocks[id]) }
+  return { blocks, rootPages: normalizeRoots(blocks, roots) }
 }

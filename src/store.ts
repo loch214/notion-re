@@ -1,12 +1,15 @@
 import { create } from 'zustand'
 import { get as idbGet, set as idbSet } from 'idb-keyval'
-import { defaultSchema, duplicateTree, makeBlock, type Workspace } from '../shared/blocks.ts'
+import { defaultSchema, duplicateTree, htmlToPlain as htmlToPlainText, makeBlock, normalizeRoots, type Workspace } from '../shared/blocks.ts'
 import type { AISettings, Block, BlockType, CellValue } from './types'
 
 const DB_KEY = 'notion-re:workspace'
 const SETTINGS_KEY = 'notion-re:ai-settings'
+/** Settings → Open on start: a page id, or empty for the last visited page. */
+export const START_PAGE_KEY = 'notion-re:start-page'
 
 const now = () => Date.now()
+const HEADING_TYPES: BlockType[] = ['header', 'sub_header', 'sub_sub_header', 'header_4']
 
 /** Live updates: the server pings us whenever the workspace file changes. */
 function listenForChanges() {
@@ -59,14 +62,22 @@ interface State {
   /** Copy a block or page (with everything inside it) right after the original. */
   duplicate: (id: string) => string
   insertBlock: (opts: { after?: string; parent?: string; index?: number; type?: BlockType; title?: string }) => string
+  /** Insert a block with children (columns, tables…) after `after` or inside `parent`. Returns its id. */
+  insertTree: (at: { after?: string; parent?: string }, tree: BlockTree) => string
   updateBlock: (id: string, patch: Partial<Omit<Block, 'properties' | 'format'>> & { properties?: Partial<Block['properties']>; format?: Partial<Block['format']> }) => void
   setType: (id: string, type: BlockType) => void
+  /** Ctrl+Alt+T: close every toggle on the page, or open them all if they're all closed. */
+  toggleAll: (pageId: string) => void
+  /** Turn a block into a sub-page with the block's text as its title (Ctrl+Shift+9). */
+  turnIntoPage: (id: string) => void
   removeBlock: (id: string) => void
   restorePage: (id: string) => void
   purgePage: (id: string) => void
   indent: (id: string) => void
   outdent: (id: string) => void
   moveBlock: (id: string, targetId: string, position: 'before' | 'after') => void
+  /** "Move to": put a page at the end of another page, or at the top level (`null`). */
+  movePage: (id: string, parentId: string | null) => void
   saveSettings: (s: AISettings) => void
 
   /** Bumped whenever the undo/redo stacks change, so UI can re-render. */
@@ -84,6 +95,14 @@ interface State {
   /** Undo a named step wherever it is in the stack. */
   undoNamed: (name: string) => { restored: number; skipped: number } | null
   showToast: (t: Toast | null) => void
+}
+
+export interface BlockTree {
+  type: BlockType
+  title?: string
+  properties?: Partial<Block['properties']>
+  format?: Partial<Block['format']>
+  children?: BlockTree[]
 }
 
 export interface Toast {
@@ -346,6 +365,8 @@ export const useStore = create<State>((set, get) => {
     load: async () => {
       const [server, local, settings] = await Promise.all([fetchServerWorkspace(), idbGet(DB_KEY), idbGet(SETTINGS_KEY)])
       const savedPage = localStorage.getItem('notion-re:current-page')
+      // A link like #/<pageId> wins over the last page you had open.
+      const linked = location.hash.match(/^#\/([\w-]+)/)?.[1]
       let ws: Workspace & { currentPageId?: string | null }
       let seed = false
       if (server !== undefined) {
@@ -363,9 +384,12 @@ export const useStore = create<State>((set, get) => {
         ws = local ?? welcomeWorkspace()
         seed = !local
       }
-      const pick = [savedPage, ws.currentPageId, ws.rootPages.find((id) => ws.blocks[id]?.alive)]
+      const pick = [linked, localStorage.getItem(START_PAGE_KEY), savedPage, ws.currentPageId, ws.rootPages.find((id) => ws.blocks[id]?.alive)]
       const currentPageId = pick.find((id) => id && ws.blocks[id]) ?? null
-      set({ blocks: ws.blocks, rootPages: ws.rootPages, currentPageId, settings: { ...defaultSettings, ...settings }, loaded: true })
+      // Repairs a list that an older version let drift (duplicates, pages moved inside others).
+      const rootPages = normalizeRoots(ws.blocks, ws.rootPages)
+      if (rootPages.join() !== ws.rootPages.join()) seed = true
+      set({ blocks: ws.blocks, rootPages, currentPageId, settings: { ...defaultSettings, ...settings }, loaded: true })
       if (seed) persist(get())
       if (mode === 'server') listenForChanges()
     },
@@ -390,7 +414,7 @@ export const useStore = create<State>((set, get) => {
           changed = true
         }
       }
-      const roots = [...remote.rootPages, ...s.rootPages.filter((id) => !remote.rootPages.includes(id))].filter((id) => blocks[id])
+      const roots = normalizeRoots(blocks, [...remote.rootPages, ...s.rootPages.filter((id) => !remote.rootPages.includes(id))])
       const rootsChanged = roots.join() !== s.rootPages.join()
       if (!changed && !rootsChanged) return
       syncedRoots = roots
@@ -493,6 +517,27 @@ export const useStore = create<State>((set, get) => {
       return b.id
     },
 
+    insertTree: ({ after, parent }, tree) => {
+      const parentId = after ? get().blocks[after].parent_id! : parent!
+      const made: Block[] = []
+      const build = (t: BlockTree, pid: string): Block => {
+        const b = makeBlock(t.type, pid, t.title ?? '')
+        Object.assign(b.properties, t.properties)
+        Object.assign(b.format, t.format)
+        made.push(b)
+        b.content = (t.children ?? []).map((c) => build(c, b.id).id)
+        return b
+      }
+      const top = build(tree, parentId)
+      mutate((blocks) => {
+        for (const b of made) blocks[b.id] = b
+        const content = [...blocks[parentId].content]
+        content.splice(after ? content.indexOf(after) + 1 : content.length, 0, top.id)
+        touch(blocks, parentId, { content })
+      })
+      return top.id
+    },
+
     updateBlock: (id, patch) =>
       mutate((blocks) => {
         const b = blocks[id]
@@ -511,7 +556,39 @@ export const useStore = create<State>((set, get) => {
         if (type === 'to_do' && properties.checked === undefined) properties.checked = false
         const format = { ...b.format }
         if (type === 'callout' && !format.icon) format.icon = '💡'
+        // Options that only make sense for the old type.
+        if (!HEADING_TYPES.includes(type)) delete format.toggleable
+        if (type !== b.type && (type === 'numbered_list' || type === 'bulleted_list' || b.type === 'numbered_list' || b.type === 'bulleted_list')) {
+          delete format.list_format
+          delete format.list_start_index
+        }
+        if (type === 'code' && b.type !== 'code') properties.title = htmlToPlainText(properties.title)
         touch(blocks, id, { type, properties, format })
+      }),
+
+    toggleAll: (pageId) =>
+      mutate((blocks) => {
+        const toggles: string[] = []
+        const walk = (id: string) => {
+          for (const c of blocks[id]?.content ?? []) {
+            const b = blocks[c]
+            if (!b?.alive || b.type === 'page') continue
+            if (b.type === 'toggle' || (HEADING_TYPES.includes(b.type) && b.format.toggleable)) toggles.push(c)
+            walk(c)
+          }
+        }
+        walk(pageId)
+        // Any open → close all; all closed → open all.
+        const collapse = toggles.some((t) => !blocks[t].format.collapsed)
+        for (const t of toggles) touch(blocks, t, { format: { ...blocks[t].format, collapsed: collapse } })
+      }),
+
+    turnIntoPage: (id) =>
+      mutate((blocks) => {
+        const b = blocks[id]
+        if (!b || b.type === 'page') return
+        // The block becomes a sub-page; its nested blocks become the page's content.
+        touch(blocks, id, { type: 'page', properties: { title: htmlToPlainText(b.properties.title) }, format: {} })
       }),
 
     // Soft delete, like Notion: pages go to trash, other blocks just disappear.
@@ -574,7 +651,7 @@ export const useStore = create<State>((set, get) => {
       mutate((blocks) => {
         const b = blocks[id]
         const parent = blocks[b.parent_id!]
-        if (parent.type === 'page' || !parent.parent_id) return
+        if (parent.type === 'page' || parent.type === 'column' || !parent.parent_id) return
         const grand = blocks[parent.parent_id]
         // Following siblings become children of the outdented block (Notion behaviour).
         const i = parent.content.indexOf(id)
@@ -598,6 +675,20 @@ export const useStore = create<State>((set, get) => {
         content.splice(content.indexOf(targetId) + (position === 'after' ? 1 : 0), 0, id)
         touch(blocks, newParent, { content })
         touch(blocks, id, { parent_id: newParent })
+      }),
+
+    movePage: (id, parentId) =>
+      mutate((blocks, s) => {
+        const b = blocks[id]
+        if (!b || b.type !== 'page' || b.parent_id === parentId) return
+        for (let p = parentId; p; p = blocks[p]?.parent_id ?? null) if (p === id) return
+        let rootPages = s.rootPages
+        if (b.parent_id) detach(blocks, id)
+        else rootPages = rootPages.filter((r) => r !== id)
+        if (parentId) touch(blocks, parentId, { content: [...blocks[parentId].content, id] })
+        else rootPages = [...rootPages, id]
+        touch(blocks, id, { parent_id: parentId })
+        return { rootPages }
       }),
 
     historyTick: 0,
@@ -661,7 +752,8 @@ export function visibleOrder(blocks: Record<string, Block>, pageId: string): str
       const b = blocks[c]
       if (!b || !b.alive) continue
       out.push(c)
-      if (b.type !== 'page' && !(b.type === 'toggle' && b.format.collapsed)) walk(c)
+      const toggleable = b.type === 'toggle' || (HEADING_TYPES.includes(b.type) && b.format.toggleable)
+      if (b.type !== 'page' && !(toggleable && b.format.collapsed)) walk(c)
     }
   }
   walk(pageId)

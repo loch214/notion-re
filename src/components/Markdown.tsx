@@ -68,6 +68,7 @@ function MdBlocks({ text }: { text: string }) {
           case 'header': return <h2 key={i} dangerouslySetInnerHTML={html} />
           case 'sub_header': return <h3 key={i} dangerouslySetInnerHTML={html} />
           case 'sub_sub_header': return <h4 key={i} dangerouslySetInnerHTML={html} />
+          case 'header_4': return <h5 key={i} dangerouslySetInnerHTML={html} />
           case 'bulleted_list': return <div key={i} className="md-li"><span className="bullet">•</span><span dangerouslySetInnerHTML={html} /></div>
           case 'numbered_list': return <div key={i} className="md-li"><span className="bullet">{n}.</span><span dangerouslySetInnerHTML={html} /></div>
           case 'to_do': return <div key={i} className="md-li"><span className="bullet">{s.checked ? '☑' : '☐'}</span><span dangerouslySetInnerHTML={html} /></div>

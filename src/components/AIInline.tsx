@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isConfigured, streamChat } from '../ai'
-import { markdownToBlocks, pageToMarkdown } from '../markdown'
+import { inlineMarkdownToHtml, markdownToBlocks, pageToMarkdown } from '../markdown'
+import { parse, render, replaceText, type Seg } from '../richtext'
 import { useStore } from '../store'
 import { Markdown } from './Markdown'
 
@@ -8,11 +9,15 @@ interface Props {
   blockId: string
   pageId: string
   onClose: () => void
+  /** Text the user selected (from the formatting toolbar's "Ask AI"); the answer can replace it. */
+  selection?: { start: number; end: number; text: string }
 }
 
 const SUGGESTIONS = ['Continue writing', 'Summarize this page', 'Brainstorm ideas about…', 'Make a to-do list for…', 'Draft an outline for…']
+// Notion's "Edit with AI" choices for selected text.
+const EDIT_SUGGESTIONS = ['Improve writing', 'Fix spelling & grammar', 'Make shorter', 'Make longer', 'Simplify language', 'Translate to…', 'Explain this']
 
-export function AIInline({ blockId, pageId, onClose }: Props) {
+export function AIInline({ blockId, pageId, onClose, selection }: Props) {
   const settings = useStore((s) => s.settings)
   const [prompt, setPrompt] = useState('')
   const [output, setOutput] = useState('')
@@ -39,7 +44,14 @@ export function AIInline({ blockId, pageId, onClose }: Props) {
     try {
       await streamChat(
         settings,
-        [{ role: 'user', content: `Here is the current page:\n\n<page>\n${context}\n</page>\n\nTask: ${text}` }],
+        [
+          {
+            role: 'user',
+            content: selection
+              ? `Here is the current page:\n\n<page>\n${context}\n</page>\n\nSelected text:\n<selection>\n${selection.text}\n</selection>\n\nTask: ${text}\nReply with only the new text for the selection (inline Markdown allowed), no preamble.`
+              : `Here is the current page:\n\n<page>\n${context}\n</page>\n\nTask: ${text}`,
+          },
+        ],
         (chunk) => setOutput((o) => o + chunk),
         abort.current.signal,
       )
@@ -66,6 +78,25 @@ export function AIInline({ blockId, pageId, onClose }: Props) {
     onClose()
   }
 
+  // Put the answer in place of the selected text (keeps the block, its type and colour).
+  const replaceSelection = () => {
+    if (!selection) return
+    const el = document.querySelector<HTMLElement>(`[data-block-id="${blockId}"] .editable`)
+    if (!el) return
+    const inserted = parse(inlineMarkdownToHtml(output.trim().replace(/\s*\n+\s*/g, ' ')))
+    const segs = replaceText(parse(el.innerHTML), selection.start, selection.end, '\u0000')
+    // Swap the placeholder character for the new segments.
+    const out: Seg[] = []
+    for (const sg of segs) {
+      const i = sg.text.indexOf('\u0000')
+      if (i < 0) out.push(sg)
+      else out.push({ text: sg.text.slice(0, i), marks: sg.marks }, ...inserted, { text: sg.text.slice(i + 1), marks: sg.marks })
+    }
+    el.innerHTML = render(out.filter((x) => x.text))
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    onClose()
+  }
+
   if (!isConfigured(settings)) {
     return (
       <div className="ai-inline">
@@ -89,7 +120,8 @@ export function AIInline({ blockId, pageId, onClose }: Props) {
         </div>
       ) : status === 'done' && output ? (
         <div className="ai-bar">
-          <button className="btn primary" onClick={insert}>Insert</button>
+          {selection && <button className="btn primary" onClick={replaceSelection}>Replace selection</button>}
+          <button className={`btn ${selection ? '' : 'primary'}`} onClick={insert}>{selection ? 'Insert below' : 'Insert'}</button>
           <button className="btn" onClick={() => run(lastPrompt.current)}>Try again</button>
           <button className="btn" onClick={onClose}>Discard</button>
         </div>
@@ -107,13 +139,13 @@ export function AIInline({ blockId, pageId, onClose }: Props) {
               ref={inputRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Ask AI to write anything…"
+              placeholder={selection ? 'Edit with AI' : 'Ask AI to write anything…'}
             />
             <button className="btn primary" disabled={!prompt.trim()}>Go</button>
           </form>
           {!prompt && (
             <div className="ai-suggestions">
-              {SUGGESTIONS.map((s) => (
+              {(selection ? EDIT_SUGGESTIONS : SUGGESTIONS).map((s) => (
                 <button
                   key={s}
                   className="menu-item"

@@ -6,11 +6,22 @@ import { copyPageLink, MovePageModal, PageMenu, toggleFavorite } from './compone
 import { PageView } from './components/PageView'
 import { Sidebar } from './components/Sidebar'
 import { FindBar } from './components/Find'
+import { Icon } from './components/Icons'
 import { FormatToolbar } from './components/FormatToolbar'
 import { pagePath, pageTitle, useStore } from './store'
 import { toggleTheme } from './theme'
 
 type ModalKind = 'search' | 'settings' | 'trash' | 'shortcuts' | null
+
+/** "just now", "5 minutes ago", "3 hours ago", "Oct 18" — like Notion's "Edited …". */
+function timeAgo(ms: number) {
+  const m = Math.round((Date.now() - ms) / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m} minute${m > 1 ? 's' : ''} ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`
+  return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
 
 export default function App() {
   const loaded = useStore((s) => s.loaded)
@@ -23,6 +34,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'account' | undefined>()
   const announcement = useStore((s) => s.announcement)
 
   useEffect(() => {
@@ -111,20 +123,34 @@ export default function App() {
       {sidebarOpen && (
         <Sidebar
           onSearch={() => setModal('search')}
-          onSettings={() => setModal('settings')}
+          onSettings={(tab) => {
+            setSettingsTab(tab)
+            setModal('settings')
+          }}
           onTrash={() => setModal('trash')}
           onAI={() => setAiOpen(true)}
+          onCollapse={() => setSidebarOpen(false)}
         />
       )}
       <main className="main">
         <header className="topbar">
-          <button className="ctl" title="Toggle sidebar (Ctrl+\)" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
+          {!sidebarOpen && (
+            <button className="ctl top-ctl" title="Open sidebar (Ctrl+\\)" onClick={() => setSidebarOpen(true)}>
+              <Icon name="expand" />
+            </button>
+          )}
+          <button className="ctl top-ctl" title="Go back (Ctrl+[)" onClick={() => history.back()}>
+            <Icon name="left" />
+          </button>
+          <button className="ctl top-ctl" title="Go forward (Ctrl+])" onClick={() => history.forward()}>
+            <Icon name="right" />
+          </button>
           <div className="crumbs">
             {path.map((p, i) => (
-              <span key={p.id}>
+              <span key={p.id} className="crumb-wrap">
                 {i > 0 && <span className="crumb-sep">/</span>}
                 <button className="crumb" onClick={() => useStore.getState().openPage(p.id)}>
-                  {p.format.icon && <span>{p.format.icon} </span>}
+                  {p.format.icon && <span className="crumb-icon">{p.format.icon}</span>}
                   {pageTitle(p)}
                 </button>
               </span>
@@ -134,17 +160,28 @@ export default function App() {
           {page && !page.alive && <span className="trash-banner">This page is in the trash</span>}
           {page?.format.locked && (
             <button className="lock-pill" title={'Locked to prevent accidental editing.\nClick to unlock'} onClick={() => useStore.getState().updateBlock(page.id, { format: { locked: undefined } })}>
-              🔒 Locked
+              <Icon name="lock" size={14} /> Locked
             </button>
           )}
-          {page && <span className="muted small">Edited {new Date(page.last_edited_time).toLocaleString()}</span>}
-          <button className="btn-ghost" onClick={() => setAiOpen(!aiOpen)} title="AI assistant (Ctrl+J)">✨ AI</button>
+          {page && <span className="top-edited" title={new Date(page.last_edited_time).toLocaleString()}>Edited {timeAgo(page.last_edited_time)}</span>}
           {page && (
-            <button className={`btn-ghost fav-star ${page.format.favorite ? 'on' : ''}`} onClick={() => toggleFavorite(page.id)} title={page.format.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
-              {page.format.favorite ? '★' : '☆'}
+            <button className="ctl top-ctl" title="Copy link (Ctrl+L)" onClick={() => copyPageLink(page.id)}>
+              <Icon name="link" />
             </button>
           )}
-          {page && <button className="btn-ghost" onClick={() => setPageMenuOpen(true)} title="Style, export, and more">⋯</button>}
+          {page && (
+            <button className={`ctl top-ctl fav-star ${page.format.favorite ? 'on' : ''}`} onClick={() => toggleFavorite(page.id)} title={page.format.favorite ? 'Remove from Favorites' : 'Add to Favorites'}>
+              <Icon name="star" />
+            </button>
+          )}
+          {page && (
+            <button className="ctl top-ctl" onClick={() => setPageMenuOpen(true)} title="Style, export, and more">
+              <Icon name="more" />
+            </button>
+          )}
+          <button className={`ctl top-ctl ${aiOpen ? 'on' : ''}`} onClick={() => setAiOpen(!aiOpen)} title="AI chat (Ctrl+J)">
+            <Icon name="sparkle" />
+          </button>
         </header>
         <div className="scroll">
           {page ? (
@@ -168,7 +205,7 @@ export default function App() {
       <FormatToolbar />
       <div className="sr-only" aria-live="polite">{announcement}</div>
       {modal === 'search' && <SearchModal onClose={() => setModal(null)} />}
-      {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
+      {modal === 'settings' && <SettingsModal tab={settingsTab} onClose={() => setModal(null)} />}
       {modal === 'trash' && <TrashModal onClose={() => setModal(null)} />}
     </div>
   )

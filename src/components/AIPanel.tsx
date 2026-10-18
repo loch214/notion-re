@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { activeModel, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
 import { hasNamedStep, pageTitle, useStore } from '../store'
+import { Icon, type IconName } from './Icons'
 import { Markdown } from './Markdown'
 
-const QUICK = ['Summarize this page', 'List the action items', 'Suggest improvements to this page', 'Explain this page simply']
-const AGENT_QUICK = ['Summarize this page', 'Turn this page into a checklist', 'Add a weekly study plan to this page', 'Create a page for my project ideas']
+const QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'List the action items']]
+const AGENT_QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'Create a task tracker']]
 
 type PanelMessage = ChatMessage & {
   tools?: string[]
@@ -127,13 +128,15 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   return (
     <aside className="ai-panel">
       <div className="ai-panel-head">
-        <span>✨ AI assistant</span>
-        <span className="muted small">
-          {agent ? 'Your Claude' : isConfigured(settings) ? `${PROVIDERS[settings.provider].label.split(' ')[0]} · ${activeModel(settings)}` : ''}
-        </span>
+        <span className="ai-avatar small"><Icon name="sparkle" size={14} /></span>
+        <span className="ai-title">{messages.length ? messages[0].content.slice(0, 40) : 'New AI chat'}</span>
         <span style={{ flex: 1 }} />
-        {messages.length > 0 && <button className="ctl" title="New chat" onClick={newChat}>⟲</button>}
-        <button className="ctl" onClick={onClose} title="Close">✕</button>
+        <button className="ctl top-ctl" title="New chat" onClick={newChat}>
+          <Icon name="compose" />
+        </button>
+        <button className="ctl top-ctl" onClick={onClose} title="Close (Ctrl+J)">
+          <Icon name="expand" />
+        </button>
       </div>
 
       {!isConfigured(settings) ? (
@@ -145,12 +148,14 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
         <>
           <div className="ai-messages">
             {messages.length === 0 && (
-              <div className="ai-empty">
-                <p className="muted">
-                  {agent ? <>Ask Claude anything, or ask it to edit <b>{pageTitle(page)}</b> or any page.</> : <>Ask anything about <b>{pageTitle(page)}</b>.</>}
-                </p>
-                {(agent ? AGENT_QUICK : QUICK).map((q) => (
-                  <button key={q} className="menu-item" onClick={() => send(q)}>{q}</button>
+              <div className="ai-welcome">
+                <span className="ai-avatar"><Icon name="sparkle" size={30} /></span>
+                <h2>How can I help you today?</h2>
+                {(agent ? AGENT_QUICK : QUICK).map(([icon, q]) => (
+                  <button key={q} className="ai-suggestion" onClick={() => send(q)}>
+                    <Icon name={icon} size={18} />
+                    <span>{q}</span>
+                  </button>
                 ))}
               </div>
             )}
@@ -190,7 +195,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
             <textarea
               value={input}
               rows={2}
-              placeholder="Ask AI…"
+              placeholder={agent ? `Ask Claude, or ask it to edit ${pageTitle(page)}…` : 'Ask AI…'}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -199,11 +204,19 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                 }
               }}
             />
-            {busy ? (
-              <button type="button" className="btn" onClick={() => abort.current?.abort()}>Stop</button>
-            ) : (
-              <button className="btn primary" disabled={!input.trim()}>Send</button>
-            )}
+            <div className="ai-compose-bar">
+              <span className="ai-model">{agent ? settings.models['claude-code'] || 'Claude' : activeModel(settings)}</span>
+              <span style={{ flex: 1 }} />
+              {busy ? (
+                <button type="button" className="ai-send stop" title="Stop" onClick={() => abort.current?.abort()}>
+                  <span className="stop-square" />
+                </button>
+              ) : (
+                <button className="ai-send" title="Send (Enter)" disabled={!input.trim()}>
+                  <Icon name="arrowUp" size={16} />
+                </button>
+              )}
+            </div>
           </form>
         </>
       )}

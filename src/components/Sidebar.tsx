@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { markdownToBlocks } from '../markdown'
 import { pageTitle, useStore } from '../store'
-import { TriangleIcon } from './Icons'
+import { Icon, PlusIcon, TriangleIcon } from './Icons'
+import { initials, useProfileName } from '../profile'
 
 interface Props {
   onSearch: () => void
-  onSettings: () => void
+  onSettings: (tab?: 'account') => void
   onTrash: () => void
   onAI: () => void
+  onCollapse: () => void
 }
 
 const RECENT_KEY = 'notion-re:recent-pages'
@@ -33,7 +35,7 @@ function useRecents(current: string | null) {
 }
 
 /** Each .md file becomes a new top-level page; the first "# Heading" is the title. */
-async function importMarkdown(files: FileList) {
+export async function importMarkdown(files: FileList) {
   const S = useStore.getState
   for (const file of Array.from(files)) {
     let md = await file.text()
@@ -59,15 +61,17 @@ async function importMarkdown(files: FileList) {
   }
 }
 
-export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
+export function Sidebar({ onSearch, onSettings, onTrash, onAI, onCollapse }: Props) {
   const rootPages = useStore((s) => s.rootPages)
   const blocks = useStore((s) => s.blocks)
   const createPage = useStore((s) => s.createPage)
   const current = useStore((s) => s.currentPageId)
+  const name = useProfileName()
   const recents = useRecents(current)
     .filter((id) => blocks[id]?.alive && blocks[id].type === 'page')
     .slice(0, 5)
   const [width, setWidth] = useState(() => Math.min(480, Math.max(200, +(localStorage.getItem(WIDTH_KEY) ?? 240))))
+  const [shut, setShut] = useState<Record<string, boolean>>({})
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
     const move = (m: MouseEvent) => setWidth(Math.min(480, Math.max(200, m.clientX)))
@@ -85,69 +89,102 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
     .sort((a, b) => pageTitle(a).localeCompare(pageTitle(b)))
     .map((b) => b.id)
 
+  // A section header that hides its list when clicked, like Notion's.
+  const section = (key: string, label: string, extra?: React.ReactNode) => (
+    <div className="side-section">
+      <button className="side-section-label" onClick={() => setShut({ ...shut, [key]: !shut[key] })}>
+        {label}
+      </button>
+      {extra}
+    </div>
+  )
+
   return (
     <aside className="sidebar" style={{ width }}>
       <div className="side-resizer" onMouseDown={startResize} />
       <div className="ws-header">
-        <span className="ws-logo">N</span>
-        <span className="ws-name">Notion(RE)</span>
+        <button className="ws-switcher" onClick={() => onSettings('account')} title="Your account">
+          <span className="avatar">{initials(name)}</span>
+          <span className="ws-name">{name ? `${name.split(' ')[0]}'s Notion` : 'Notion(RE)'}</span>
+        </button>
+        <span style={{ flex: 1 }} />
+        <button className="ctl ws-ctl" title="Close sidebar (Ctrl+\\)" onClick={onCollapse}>
+          <Icon name="collapse" size={18} />
+        </button>
+        <button className="ctl ws-ctl" title="New page (Ctrl+N)" onClick={() => createPage(null)}>
+          <Icon name="compose" size={18} />
+        </button>
       </div>
+      <button className="side-search" onClick={onSearch}>
+        <Icon name="search" size={16} />
+        <span>Search</span>
+        <kbd>Ctrl+K</kbd>
+      </button>
       <nav className="side-actions">
-        <button className="side-item" onClick={onSearch}>
-          <span className="side-ic">🔍</span> Search <kbd>Ctrl K</kbd>
-        </button>
         <button className="side-item" onClick={onAI}>
-          <span className="side-ic">✨</span> AI assistant
-        </button>
-        <button className="side-item" onClick={onSettings}>
-          <span className="side-ic">⚙️</span> Settings
+          <span className="side-ic"><Icon name="sparkle" /></span> AI chat
         </button>
       </nav>
 
-      {recents.length > 0 && (
-        <>
-          <div className="side-section">
-            <span>Recent</span>
-          </div>
-          <div className="tree tree-favorites">
-            {recents.map((id) => (
-              <RecentItem key={id} id={id} />
-            ))}
-          </div>
-        </>
-      )}
+      <div className="side-scroll">
+        {recents.length > 0 && (
+          <>
+            {section('recent', 'Recent')}
+            {!shut.recent && (
+              <div className="tree tree-favorites">
+                {recents.map((id) => (
+                  <RecentItem key={id} id={id} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
 
-      {favorites.length > 0 && (
-        <>
-          <div className="side-section">
-            <span>Favorites</span>
-          </div>
-          <div className="tree tree-favorites">
-            {favorites.map((id) => (
-              <TreeItem key={id} id={id} depth={0} />
-            ))}
-          </div>
-        </>
-      )}
+        {favorites.length > 0 && (
+          <>
+            {section('favorites', 'Favorites')}
+            {!shut.favorites && (
+              <div className="tree tree-favorites">
+                {favorites.map((id) => (
+                  <TreeItem key={id} id={id} depth={0} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
 
-      <div className="side-section">
-        <span>Private</span>
-        <button className="ctl" title="New page" onClick={() => createPage(null)}>+</button>
+        {section(
+          'private',
+          'Private',
+          <span className="side-section-actions">
+            <button className="ctl" title="New database" onClick={() => useStore.getState().createDatabase({ parent: null })}>
+              ▦
+            </button>
+            <button className="ctl" title="New page" onClick={() => createPage(null)}>
+              <PlusIcon />
+            </button>
+          </span>,
+        )}
+        {!shut.private && (
+          <div className="tree">
+            {rootPages
+              .filter((id) => blocks[id]?.alive)
+              .map((id) => (
+                <TreeItem key={id} id={id} depth={0} />
+              ))}
+            <button className="side-item muted" onClick={() => createPage(null)}>
+              <span className="side-ic"><PlusIcon /></span> New page
+            </button>
+          </div>
+        )}
       </div>
-      <div className="tree">
-        {rootPages
-          .filter((id) => blocks[id]?.alive)
-          .map((id) => (
-            <TreeItem key={id} id={id} depth={0} />
-          ))}
-        <button className="side-item muted" onClick={() => createPage(null)}>
-          <span className="side-ic">＋</span> New page
+
+      <div className="side-bottom">
+        <button className="side-item" onClick={() => onSettings()}>
+          <span className="side-ic"><Icon name="gear" /></span> Settings
         </button>
-        <button className="side-item muted" onClick={() => useStore.getState().createDatabase({ parent: null })}>
-          <span className="side-ic">▦</span> New database
-        </button>
-        <label className="side-item muted">
-          <span className="side-ic">⤒</span> Import Markdown
+        <label className="side-item">
+          <span className="side-ic"><Icon name="import" /></span> Import
           <input
             type="file"
             accept=".md,.markdown,.txt"
@@ -159,11 +196,8 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI }: Props) {
             }}
           />
         </label>
-      </div>
-
-      <div className="side-bottom">
         <button className="side-item" onClick={onTrash}>
-          <span className="side-ic">🗑</span> Trash
+          <span className="side-ic"><Icon name="trash" /></span> Trash
         </button>
       </div>
     </aside>
@@ -176,7 +210,7 @@ function RecentItem({ id }: { id: string }) {
   return (
     <div className={`tree-item ${current === id ? 'active' : ''}`} style={{ paddingLeft: 8 }} onClick={() => useStore.getState().openPage(id)}>
       <span className="tree-arrow">
-        <span className="tree-icon">{page.format.icon ?? '📄'}</span>
+        <span className="tree-icon">{page.format.icon ?? <Icon name="page" size={17} />}</span>
       </span>
       <span className="tree-title">{pageTitle(page)}</span>
     </div>
@@ -232,7 +266,7 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
             setOpen(!open)
           }}
         >
-          <span className="tree-icon">{page.format.icon ?? '📄'}</span>
+          <span className="tree-icon">{page.format.icon ?? <Icon name="page" size={17} />}</span>
           <span className={`tree-tri ${open ? 'open' : ''}`}>
             <TriangleIcon />
           </span>
@@ -247,7 +281,7 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
               S().removeBlock(id)
             }}
           >
-            🗑
+            <Icon name="trash" size={15} />
           </button>
           <button
             className="ctl"
@@ -258,7 +292,7 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
               setOpen(true)
             }}
           >
-            +
+            <PlusIcon />
           </button>
         </span>
       </div>

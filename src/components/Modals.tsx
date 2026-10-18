@@ -4,6 +4,10 @@ import { htmlToText } from '../markdown'
 import { pagePath, pageTitle, START_PAGE_KEY, useStore } from '../store'
 import { setThemePref, useThemePref, type ThemePref } from '../theme'
 import type { AIProvider, AISettings } from '../types'
+import { initials, setProfileName, useProfileName } from '../profile'
+import { Dropdown } from './Dropdown'
+import { Icon, type IconName } from './Icons'
+import { importMarkdown } from './Sidebar'
 
 function Modal({ title, onClose, children, wide }: { title?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
@@ -21,8 +25,54 @@ function Modal({ title, onClose, children, wide }: { title?: string; onClose: ()
   )
 }
 
-/** Your own settings: look and which page opens when the app starts. */
-function Preferences() {
+type SettingsTab = 'account' | 'preferences' | 'ai' | 'import' | 'shortcuts'
+
+/** One settings row: name + description on the left, the control on the right (Notion's layout). */
+function Row({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="set-row">
+      <div className="set-row-text">
+        <div className="set-row-title">{title}</div>
+        {desc && <div className="set-row-desc">{desc}</div>}
+      </div>
+      <div className="set-row-control">{children}</div>
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="set-section">
+      <h3>{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function AccountPane() {
+  const name = useProfileName()
+  const [draft, setDraft] = useState(name)
+  return (
+    <>
+      <Section title="My profile">
+        <div className="set-profile">
+          <span className="avatar large">{initials(draft)}</span>
+          <label className="set-field">
+            <span>Preferred name</span>
+            <input className="input" value={draft} placeholder="Your name" onChange={(e) => setDraft(e.target.value)} onBlur={() => setProfileName(draft.trim())} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+          </label>
+        </div>
+      </Section>
+      <Section title="This device">
+        <Row title="Where your pages are saved" desc="In data/workspace.json in the app folder, on this computer only. Page history is in data/history.">
+          <span className="muted small">Local</span>
+        </Row>
+      </Section>
+    </>
+  )
+}
+
+function PreferencesPane() {
   const theme = useThemePref()
   const blocks = useStore((st) => st.blocks)
   const rootPages = useStore((st) => st.rootPages)
@@ -30,52 +80,51 @@ function Preferences() {
   const pages = rootPages.filter((id) => blocks[id]?.alive)
   return (
     <>
-      <label className="field">
-        Appearance
-        <select value={theme} onChange={(e) => setThemePref(e.target.value as ThemePref)}>
-          <option value="system">Use system setting</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-      </label>
-      <label className="field">
-        Open on start
-        <select
-          value={start}
-          onChange={(e) => {
-            setStart(e.target.value)
-            localStorage.setItem(START_PAGE_KEY, e.target.value)
-          }}
-        >
-          <option value="">Last visited page</option>
-          {pages.map((id) => (
-            <option key={id} value={id}>
-              {blocks[id].format.icon ? `${blocks[id].format.icon} ` : ''}
-              {pageTitle(blocks[id])}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Section title="Appearance">
+        <Row title="Theme" desc="Choose a theme for Notion(RE) on this device">
+          <Dropdown<ThemePref>
+            value={theme}
+            onChange={setThemePref}
+            options={[
+              { value: 'system', label: 'Use system setting' },
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ]}
+          />
+        </Row>
+      </Section>
+      <Section title="Startup">
+        <Row title="Open on start" desc="Choose what to show when the app opens">
+          <Dropdown
+            value={start}
+            width={280}
+            onChange={(v) => {
+              setStart(v)
+              localStorage.setItem(START_PAGE_KEY, v)
+            }}
+            options={[{ value: '', label: 'Last visited page' }, ...pages.map((id) => ({ value: id, label: `${blocks[id].format.icon ? blocks[id].format.icon + ' ' : ''}${pageTitle(blocks[id])}` }))]}
+          />
+        </Row>
+      </Section>
     </>
   )
 }
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+function AIPane() {
   const saved = useStore((s) => s.settings)
   const saveSettings = useStore((s) => s.saveSettings)
-  const [s, setS] = useState<AISettings>(saved)
   const [test, setTest] = useState<{ state: 'idle' | 'running' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
-
+  const s = saved
   const p = s.provider
   const [cc, setCc] = useState<ClaudeStatus | null>(null)
   useEffect(() => {
     if (p === 'claude-code') claudeStatus(true).then(setCc)
   }, [p])
+  // Saved as you change it, like Notion's settings.
   const update = (patch: Partial<AISettings>) => {
-    setS({ ...s, ...patch })
+    saveSettings({ ...s, ...patch })
     setTest({ state: 'idle' })
   }
-
   const runTest = async () => {
     setTest({ state: 'running' })
     try {
@@ -88,85 +137,136 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Settings" onClose={onClose}>
-      <Preferences />
-      <div className="modal-title" style={{ marginTop: 22 }}>AI</div>
-      <p className="muted small">
-        Notion(RE) calls your AI provider directly from this browser. Keys are stored only in this browser's local
-        database and are never uploaded anywhere else.
-      </p>
+    <>
+      <Section title="Provider">
+        <Row title="AI provider" desc="Claude through your subscription can also read and edit your pages from the AI panel.">
+          <Dropdown<AIProvider> value={p} width={300} onChange={(v) => update({ provider: v })} options={Object.entries(PROVIDERS).map(([k, v]) => ({ value: k as AIProvider, label: v.label }))} />
+        </Row>
+        {p === 'claude-code' ? (
+          <div className={`claude-status ${cc ? (cc.available ? 'ok' : 'fail') : ''}`}>
+            {!cc
+              ? 'Checking for Claude Code…'
+              : cc.available
+                ? <>Connected to Claude Code {cc.version}. No API key needed.</>
+                : <>Claude Code wasn't found. Install it and run <code>claude</code> once in a terminal to sign in.</>}
+          </div>
+        ) : (
+          <Row title="API key" desc="Stored only in this app's browser storage.">
+            <input
+              className="input set-input"
+              type="password"
+              autoComplete="off"
+              value={s.apiKeys[p] ?? ''}
+              placeholder={PROVIDERS[p].keyHint}
+              onChange={(e) => update({ apiKeys: { ...s.apiKeys, [p]: e.target.value.trim() } })}
+            />
+          </Row>
+        )}
+        {p === 'openai-compatible' && (
+          <Row title="Base URL">
+            <input className="input set-input" value={s.baseUrl} placeholder="http://localhost:11434/v1" onChange={(e) => update({ baseUrl: e.target.value })} />
+          </Row>
+        )}
+        <Row title="Model" desc={p === 'claude-code' ? 'Leave empty for the default, or type sonnet, opus or haiku.' : undefined}>
+          <input
+            className="input set-input"
+            value={s.models[p] ?? ''}
+            placeholder={p === 'claude-code' ? 'Default' : PROVIDERS[p].defaultModel || 'Model name'}
+            onChange={(e) => update({ models: { ...s.models, [p]: e.target.value.trim() } })}
+          />
+        </Row>
+        <Row title="Test connection" desc={test.state === 'idle' ? 'Sends a tiny test message.' : <span className={`test-${test.state}`}>{test.state === 'running' ? 'Testing…' : test.msg}</span>}>
+          <button className="btn" onClick={runTest} disabled={test.state === 'running'}>Test</button>
+        </Row>
+      </Section>
+    </>
+  )
+}
 
-      <label className="field">
-        <span>Provider</span>
-        <select value={p} onChange={(e) => update({ provider: e.target.value as AIProvider })}>
-          {Object.entries(PROVIDERS).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
+function ImportPane() {
+  return (
+    <Section title="Import">
+      <Row title="Markdown" desc="Each .md file becomes a new page. The first # heading becomes its title.">
+        <label className="btn">
+          Choose files
+          <input
+            type="file"
+            accept=".md,.markdown,.txt"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) importMarkdown(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </label>
+      </Row>
+    </Section>
+  )
+}
+
+function ShortcutsPane() {
+  return (
+    <Section title="Keyboard shortcuts">
+      {SHORTCUTS.map(([a, k]) => (
+        <div key={a} className="shortcut-row">
+          <span>{a}</span>
+          <kbd>{k}</kbd>
+        </div>
+      ))}
+    </Section>
+  )
+}
+
+const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub?: string }[] = [
+  { id: 'preferences', label: 'Preferences', icon: 'sliders', title: 'Preferences', sub: 'Choose how you want Notion(RE) to look and behave' },
+  { id: 'ai', label: 'AI', icon: 'sparkle', title: 'AI', sub: 'Your own AI, used by the AI panel and inline AI' },
+  { id: 'import', label: 'Import', icon: 'import', title: 'Import' },
+  { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts' },
+]
+
+export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onClose: () => void; tab?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(firstTab)
+  const name = useProfileName()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.db-popover') && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const info = tab === 'account' ? { title: 'Account', sub: undefined } : TABS.find((t) => t.id === tab)!
+  return (
+    <div className="modal-backdrop settings-backdrop" onMouseDown={onClose}>
+      <div className="settings" onMouseDown={(e) => e.stopPropagation()}>
+        <nav className="settings-nav">
+          <div className="settings-nav-head">Account</div>
+          <button className={`settings-nav-item ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
+            <span className="avatar">{initials(name)}</span>
+            <span>{name || 'Your account'}</span>
+          </button>
+          <div className="settings-nav-head">Settings</div>
+          {TABS.map((t) => (
+            <button key={t.id} className={`settings-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+              <Icon name={t.icon} size={18} />
+              <span>{t.label}</span>
+            </button>
           ))}
-        </select>
-      </label>
-
-      {p === 'openai-compatible' && (
-        <label className="field">
-          <span>Base URL</span>
-          <input
-            value={s.baseUrl}
-            placeholder="https://openrouter.ai/api/v1  or  http://localhost:11434/v1"
-            onChange={(e) => update({ baseUrl: e.target.value })}
-          />
-        </label>
-      )}
-
-      {p === 'claude-code' ? (
-        <div className={`claude-status ${cc ? (cc.available ? 'ok' : 'fail') : ''}`}>
-          {!cc
-            ? 'Checking for Claude Code…'
-            : cc.available
-              ? <>✅ Using your Claude subscription through Claude Code ({cc.version}). No API key needed. In the AI panel, Claude can also read and edit your pages.</>
-              : <>Claude Code wasn't found. Install it, run <code>claude</code> once in a terminal to sign in, and start the app with <code>npm run dev</code>.</>}
+        </nav>
+        <div className="settings-body">
+          <button className="settings-close ctl" title="Close" onClick={onClose}>
+            <Icon name="close" size={16} />
+          </button>
+          <div className="settings-content">
+            <h1>{info.title}</h1>
+            {info.sub && <p className="settings-sub">{info.sub}</p>}
+            {tab === 'account' && <AccountPane />}
+            {tab === 'preferences' && <PreferencesPane />}
+            {tab === 'ai' && <AIPane />}
+            {tab === 'import' && <ImportPane />}
+            {tab === 'shortcuts' && <ShortcutsPane />}
+          </div>
         </div>
-      ) : (
-        <label className="field">
-          <span>API key</span>
-          <input
-            type="password"
-            autoComplete="off"
-            value={s.apiKeys[p] ?? ''}
-            placeholder={PROVIDERS[p].keyHint}
-            onChange={(e) => update({ apiKeys: { ...s.apiKeys, [p]: e.target.value.trim() } })}
-          />
-        </label>
-      )}
-
-      <label className="field">
-        <span>Model{p === 'claude-code' ? ' (optional)' : ''}</span>
-        <input
-          value={s.models[p] ?? ''}
-          placeholder={p === 'claude-code' ? 'Default — or sonnet, opus, haiku' : PROVIDERS[p].defaultModel || 'e.g. llama3.1, anthropic/claude-sonnet-5-5'}
-          onChange={(e) => update({ models: { ...s.models, [p]: e.target.value.trim() } })}
-        />
-      </label>
-
-      {test.state !== 'idle' && (
-        <div className={`test-result ${test.state}`}>
-          {test.state === 'running' ? 'Testing connection…' : test.msg}
-        </div>
-      )}
-
-      <div className="modal-actions">
-        <button className="btn" onClick={runTest} disabled={test.state === 'running'}>Test connection</button>
-        <span style={{ flex: 1 }} />
-        <button className="btn" onClick={onClose}>Cancel</button>
-        <button
-          className="btn primary"
-          onClick={() => {
-            saveSettings(s)
-            onClose()
-          }}
-        >
-          Save
-        </button>
       </div>
-    </Modal>
+    </div>
   )
 }
 

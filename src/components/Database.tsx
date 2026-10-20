@@ -138,6 +138,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
             {flat.map(({ row, depth }) => (
               <tr
                 key={row.id}
+                data-row-id={row.id}
                 className={dropRow?.id === row.id ? `drop-${dropRow.pos}` : ''}
                 onDragOver={(e) => {
                   if (!e.dataTransfer.types.includes('application/x-row')) return
@@ -650,7 +651,14 @@ export function RowProperties({ rowId }: { rowId: string }) {
   const row = useStore((s) => s.blocks[rowId])
   const db = useStore((s) => (row?.parent_id ? s.blocks[row.parent_id] : undefined))
   const blocks = useStore((s) => s.blocks)
+  // Clicking a property name opens its menu (rename, type, options…); "+ Add a property" adds one, like Notion.
+  const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
   if (!row || !db?.schema) return null
+  const addProperty = (rect: DOMRect) => {
+    const prop: DbProperty = { id: shortId(), name: 'Text', type: 'text' }
+    useStore.getState().updateBlock(db.id, { schema: [...db.schema!, prop] })
+    setMenu({ propId: prop.id, rect })
+  }
   const parentId = row.properties.parent_row
   const parent = parentId && blocks[parentId]?.alive ? blocks[parentId] : undefined
   const subs = dbRows(blocks, db).filter((r) => r.properties.parent_row === row.id)
@@ -660,9 +668,9 @@ export function RowProperties({ rowId }: { rowId: string }) {
         .filter((p) => p.type !== 'title')
         .map((p) => (
           <div key={p.id} className="row-prop">
-            <span className="row-prop-name">
+            <button className="row-prop-name" onClick={(e) => setMenu({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })}>
               <span className="db-type-icon">{TYPE_ICON[p.type]}</span> {p.name}
-            </span>
+            </button>
             <div className={`row-prop-value db-td-${p.type}`}>
               <Cell prop={p} row={row} dbId={db.id} />
             </div>
@@ -680,6 +688,10 @@ export function RowProperties({ rowId }: { rowId: string }) {
           </div>
         </div>
       )}
+      <button className="row-prop-add" onClick={(e) => addProperty(e.currentTarget.getBoundingClientRect())}>
+        <PlusIcon size={14} /> Add a property
+      </button>
+      {menu && db.schema.some((p) => p.id === menu.propId) && <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />}
     </div>
   )
 }

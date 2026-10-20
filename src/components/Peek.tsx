@@ -1,12 +1,12 @@
 // Side peek: database rows open in a panel on the right (Notion's default "Open pages in → Side peek").
 // "Open as full page" or a view set to "Full page" opens them normally instead.
 
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { pageTitle, useStore } from '../store'
 import type { DbView } from '../types'
 import { Icon } from './Icons'
 import { PageView } from './PageView'
-import { copyPageLink } from './PageMenu'
+import { copyPageLink, PageMenu, toggleFavorite } from './PageMenu'
 
 let peekId: string | null = null
 const listeners = new Set<() => void>()
@@ -41,8 +41,36 @@ function sibling(id: string, step: number) {
   return ids[ids.indexOf(id) + step]
 }
 
+/** The row open in the peek (rows outline themselves blue, like Notion). */
+export const usePeekId = usePeek
+
 export function PeekPanel() {
   const id = usePeek()
+  // Notion's peek pushes the page aside and slides in / out (0.2s); keep the last page while sliding out.
+  const [shownId, setShownId] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    if (id) {
+      setShownId(id)
+      let raf = requestAnimationFrame(() => (raf = requestAnimationFrame(() => setOpen(true))))
+      return () => cancelAnimationFrame(raf)
+    }
+    setOpen(false)
+    const t = setTimeout(() => setShownId(null), 220)
+    return () => clearTimeout(t)
+  }, [id])
+  // Clicking the page outside a database closes the peek (clicks on rows switch it instead).
+  useEffect(() => {
+    if (!id) return
+    const down = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (t.closest('.peek, .popover, .modal-backdrop, [class*="db-"], .ai-dock, .sidebar')) return
+      if (t.closest('.main')) setPeek(null)
+    }
+    window.addEventListener('mousedown', down)
+    return () => window.removeEventListener('mousedown', down)
+  }, [id])
   const page = useStore((s) => (id ? s.blocks[id] : undefined))
   const current = useStore((s) => s.currentPageId)
   // Going to another page (link, sidebar, back) closes the peek, like Notion.
@@ -65,24 +93,29 @@ export function PeekPanel() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [id])
-  if (!id || !page) return null
+  const shown = useStore((s) => (shownId ? s.blocks[shownId] : undefined))
+  if (!shownId || !shown) return null
+  const pid = shownId
   return (
-    <>
-      <div className="peek-backdrop" onMouseDown={() => setPeek(null)} />
-      <aside className="peek" aria-label={`Peek: ${pageTitle(page)}`}>
+    <div className={`peek-dock ${open && id ? 'open' : ''}`}>
+      <aside className="peek" aria-label={`Peek: ${pageTitle(shown)}`}>
         <header className="peek-head">
           <button className="ctl" title="Close (Esc)" onClick={() => setPeek(null)}><Icon name="expand" size={16} /></button>
-          <button className="ctl" title="Open as full page" onClick={() => useStore.getState().openPage(id)}><Icon name="openFull" size={16} /></button>
+          <button className="ctl" title="Open as full page" onClick={() => useStore.getState().openPage(pid)}><Icon name="openFull" size={16} /></button>
           <span className="peek-sep" />
-          <button className="ctl" title="Previous (Ctrl+Shift+K)" disabled={!sibling(id, -1)} onClick={() => setPeek(sibling(id, -1) ?? id)}><Icon name="up" size={16} /></button>
-          <button className="ctl" title="Next (Ctrl+Shift+J)" disabled={!sibling(id, 1)} onClick={() => setPeek(sibling(id, 1) ?? id)}><Icon name="down" size={16} /></button>
+          <button className="ctl" title="Previous (Ctrl+Shift+K)" disabled={!sibling(pid, -1)} onClick={() => setPeek(sibling(pid, -1) ?? pid)}><Icon name="up" size={16} /></button>
+          <button className="ctl" title="Next (Ctrl+Shift+J)" disabled={!sibling(pid, 1)} onClick={() => setPeek(sibling(pid, 1) ?? pid)}><Icon name="down" size={16} /></button>
           <span style={{ flex: 1 }} />
-          <button className="ctl" title="Copy link" onClick={() => copyPageLink(id)}><Icon name="link" size={16} /></button>
+          <button className="ctl peek-btn" title="Copy link" onClick={() => copyPageLink(pid)}><Icon name="link" size={16} /></button>
+          <button className={`ctl peek-btn fav-star ${shown.format.favorite ? 'on' : ''}`} title={shown.format.favorite ? 'Remove from Favorites' : 'Add to Favorites'} onClick={() => toggleFavorite(pid)}><Icon name="star" size={16} /></button>
+          <button className="ctl peek-btn" title="Style, export, and more" onClick={() => setMenuOpen(!menuOpen)}><Icon name="more" size={16} /></button>
         </header>
         <div className="peek-scroll">
-          <PageView key={id} pageId={id} />
+          <PageView key={pid} pageId={pid} />
         </div>
       </aside>
-    </>
+      {menuOpen && <PageMenu pageId={pid} onClose={() => setMenuOpen(false)} onHistory={() => useStore.getState().openPage(pid)} onMove={() => useStore.getState().openPage(pid)} />}
+      {id && <style>{`[data-row-id="${id}"] { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 4px; }`}</style>}
+    </div>
   )
 }

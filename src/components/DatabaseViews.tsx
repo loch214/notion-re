@@ -30,7 +30,7 @@ export function DatabaseView({ dbId }: { dbId: string }) {
   const db = useStore((s) => s.blocks[dbId])
   const blocks = useStore((s) => s.blocks)
   const [activeId, setActiveId] = useState(() => localStorage.getItem(viewKey(dbId)) ?? '')
-  const [menu, setMenu] = useState<{ kind: 'view' | 'add' | 'filter' | 'sort' | 'templates'; rect: DOMRect } | null>(null)
+  const [menu, setMenu] = useState<{ kind: 'view' | 'add' | 'filter' | 'sort' | 'templates' | 'switch'; rect: DOMRect } | null>(null)
 
   useEffect(() => {
     if (activeId) localStorage.setItem(viewKey(dbId), activeId)
@@ -39,6 +39,15 @@ export function DatabaseView({ dbId }: { dbId: string }) {
   const views = db?.schema ? getViews(db) : []
   const view = views.find((v) => v.id === activeId) ?? views[0]
   const [searching, setSearching] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setNarrow(el.clientWidth < 640))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [!!db?.schema])
   const [find, setFind] = useState('')
   const rows = useMemo(() => {
     const all = db?.schema && view ? applyView(blocks, db, view) : []
@@ -57,13 +66,18 @@ export function DatabaseView({ dbId }: { dbId: string }) {
     return id
   }
 
-  const open = (kind: 'view' | 'add' | 'filter' | 'sort' | 'templates') => (e: React.MouseEvent<HTMLElement>) =>
+  const open = (kind: 'view' | 'add' | 'filter' | 'sort' | 'templates' | 'switch') => (e: React.MouseEvent<HTMLElement>) =>
     setMenu({ kind, rect: e.currentTarget.getBoundingClientRect() })
 
   return (
-    <div className="db">
-      <div className="db-views">
-        {views.map((v) => (
+    <div className="db" ref={boxRef}>
+      <div className={`db-views ${narrow ? 'narrow' : ''}`}>
+        {narrow && (
+          <button className="db-view-tab active db-view-switch" title="Switch view" onClick={open('switch')}>
+            <Icon name={VIEW_ICONS[view.type]} size={16} /> {view.name} <Icon name="down" size={12} />
+          </button>
+        )}
+        {!narrow && views.map((v) => (
           <button
             key={v.id}
             className={`db-view-tab ${v.id === view.id ? 'active' : ''}`}
@@ -73,9 +87,9 @@ export function DatabaseView({ dbId }: { dbId: string }) {
             <Icon name={VIEW_ICONS[v.type]} size={16} /> {v.name}
           </button>
         ))}
-        <button className="db-view-tab db-view-add" title="Add a view" onClick={open('add')}>
+        {!narrow && <button className="db-view-tab db-view-add" title="Add a view" onClick={open('add')}>
           <PlusIcon />
-        </button>
+        </button>}
         <span style={{ flex: 1 }} />
         <button className={`ctl db-tool ${view.filter.filters.length ? 'on' : ''}`} title={view.filter.filters.length ? `Filter · ${view.filter.filters.length}` : 'Filter'} onClick={open('filter')}>
           <Icon name="filter" size={16} />
@@ -83,7 +97,7 @@ export function DatabaseView({ dbId }: { dbId: string }) {
         <button className={`ctl db-tool ${view.sort.length ? 'on' : ''}`} title={view.sort.length ? `Sort · ${view.sort.length}` : 'Sort'} onClick={open('sort')}>
           <Icon name="sort" size={16} />
         </button>
-        {searching ? (
+        {narrow && !searching ? null : searching ? (
           <span className="db-search">
             <Icon name="search" size={14} />
             <input autoFocus placeholder="Type to search…" value={find} onChange={(e) => setFind(e.target.value)} onBlur={() => !find && setSearching(false)} onKeyDown={(e) => e.key === 'Escape' && (setFind(''), setSearching(false))} />
@@ -103,6 +117,18 @@ export function DatabaseView({ dbId }: { dbId: string }) {
           </button>
         </span>
       </div>
+      {menu?.kind === 'switch' && (
+        <Popover anchor={menu.rect} onClose={() => setMenu(null)} width={240}>
+          {views.map((v) => (
+            <button key={v.id} className={`menu-item compact ${v.id === view.id ? 'active' : ''}`} onClick={() => { setActiveId(v.id); setMenu(null) }}>
+              <Icon name={VIEW_ICONS[v.type]} size={16} /> <span style={{ flex: 1 }}>{v.name}</span> {v.id === view.id && <Icon name="check" size={14} />}
+            </button>
+          ))}
+          <button className="menu-item compact" onClick={() => setMenu({ kind: 'add', rect: menu.rect })}>
+            <PlusIcon /> Add view
+          </button>
+        </Popover>
+      )}
       {menu?.kind === 'templates' && <TemplatesMenu db={db} view={view} anchor={menu.rect} onClose={() => setMenu(null)} />}
 
       {view.type === 'table' && <TableBody db={db} rows={rows} view={view} onNewRow={() => newRow()} />}
@@ -489,6 +515,7 @@ function Card({ db, row, view, skip, children }: { db: Block; row: Block; view: 
   return (
     <div
       className="db-card"
+      data-row-id={row.id}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('application/x-db-row', row.id)
@@ -560,11 +587,12 @@ function ListBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className="db-list">
       {rows.map((r) => (
-        <div key={r.id} className="db-list-row" onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
+        <div key={r.id} className="db-list-row" data-row-id={r.id} onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
           {r.format.icon && <span className="db-row-icon">{r.format.icon}</span>}
           <span className="db-list-title">{pageTitle(r)}</span>
-          <span style={{ flex: 1 }} />
-          <CardProps db={db} row={r} view={view} />
+          <span className="db-list-props">
+            <CardProps db={db} row={r} view={view} />
+          </span>
         </div>
       ))}
       <button className="db-new-row" onClick={() => openRow(newRow(), view)}>＋ New page</button>

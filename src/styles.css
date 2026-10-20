@@ -1167,3 +1167,28 @@ img.avatar { object-fit: cover; padding: 0; }
 .amenu.profile-menu { position: fixed; left: 8px; bottom: 52px; width: 280px; }
 .profile-menu-head { padding: 6px 8px 4px; font-size: 12px; color: var(--muted); }
 .ws-logo .ws-logo-mark { background: var(--text); color: var(--bg); }
+/* Search modal like Notion's (Session 11) */
+.modal.wide:has(.search-head) { width: 755px; display: flex; flex-direction: column; overflow: hidden; height: min(72vh, 640px); max-height: none; }
+.search-head { display: flex; align-items: center; gap: 10px; padding: 0 16px; color: var(--muted); border-bottom: 1px solid var(--divider, var(--border)); }
+.search-head .search-input { border: none; padding: 14px 0; font-size: 16px; color: var(--text); }
+.search-filters { display: flex; align-items: center; gap: 6px; padding: 8px 14px; }
+.search-chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 13px; font-size: 13px; color: var(--muted); background: none; box-shadow: inset 0 0 0 1px var(--border); }
+.search-chip:hover { background: var(--bg-hover); }
+.search-chip.on { color: var(--accent); background: rgba(35, 131, 226, .08); box-shadow: inset 0 0 0 1px rgba(35, 131, 226, .35); }
+.search-chip-aa { font-weight: 600; font-size: 12px; }
+.modal.wide:has(.search-head) .search-results { flex: 1; max-height: none; padding: 0 8px 8px; }
+.search-row, .search-ask { align-items: flex-start; gap: 10px; padding: 6px 8px; }
+.search-row-icon { width: 20px; height: 22px; display: grid; place-items: center; flex-shrink: 0; color: var(--muted); font-size: 16px; }
+.search-row-text { flex: 1; min-width: 0; line-height: 22px; }
+.search-row-text .menu-label { display: inline; }
+.search-row-path { color: var(--faint); font-size: 13px; }
+.search-row .menu-hint { line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-row-date { font-size: 12px; color: var(--faint); line-height: 22px; opacity: 0; }
+.search-row.active .search-row-date { opacity: 1; }
+.search-ask { align-items: center; }
+.search-ask .search-row-icon { color: var(--accent); }
+.search-foot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--divider, var(--border)); font-size: 12px; color: var(--faint); }
+.search-foot kbd { font: inherit; color: var(--muted); margin-right: 4px; background: none; border: 0; padding: 0; }
+.settings-search { display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 4px 10px; padding: 0 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); }
+.settings-search:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px rgba(35, 131, 226, .25); }
+.settings-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; }

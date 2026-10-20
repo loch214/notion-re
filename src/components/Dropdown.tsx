@@ -3,12 +3,12 @@ import { Icon } from './Icons'
 import { Popover } from './Database'
 
 /** Notion-style select: a quiet button with the current value and a chevron, opening a menu. */
-export function Dropdown<T extends string>({ value, options, onChange, width = 240 }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; width?: number }) {
+export function Dropdown<T extends string>({ value, options, onChange, width = 240, className = '' }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; width?: number; className?: string }) {
   const [rect, setRect] = useState<DOMRect | null>(null)
   const current = options.find((o) => o.value === value)
   return (
     <>
-      <button className="dropdown-btn" onClick={(e) => setRect(e.currentTarget.getBoundingClientRect())}>
+      <button className={`dropdown-btn ${className}`} onClick={(e) => setRect(e.currentTarget.getBoundingClientRect())}>
         <span>{current?.label ?? '—'}</span>
         <Icon name="down" size={12} />
       </button>

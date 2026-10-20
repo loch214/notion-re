@@ -40,6 +40,7 @@ interface ChatSummary {
 /** Changes reach the app over the live-sync channel shortly after a tool runs; keep listening a bit. */
 const CHECKPOINT_GRACE_MS = 2000
 const OPEN_CHAT_KEY = 'notion-re:ai-chat'
+export const ENTER_NEWLINE_KEY = 'notion-re:enter-newline'
 /** File types the composer accepts (the server's upload list). */
 const ATTACH_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'txt', 'md', 'csv', 'json', 'docx', 'xlsx', 'pptx']
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp']
@@ -398,7 +399,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                 addFiles(pasted)
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // Settings → Preferences → "Use Enter to add a new line": then Ctrl+Enter sends.
+                const enterNewLine = localStorage.getItem(ENTER_NEWLINE_KEY) === '1'
+                if (e.key === 'Enter' && !e.shiftKey && (enterNewLine ? e.ctrlKey || e.metaKey : true)) {
                   e.preventDefault()
                   send(input)
                 }

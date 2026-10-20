@@ -72,7 +72,7 @@ export function InboxPanel({ left, onClose }: { left: number; onClose: () => voi
                       <span className="inbox-time">{ago(r.at)}</span>
                     </span>
                     <span className="inbox-page">{r.row.format.icon ?? '📄'} {pageTitle(r.row)}</span>
-                    <span className="inbox-meta">{r.prop.name}: {formatDateValue(r.value, r.prop)} · {pageTitle(r.db)}</span>
+                    <span className="inbox-meta">{r.prop && r.db ? `${r.prop.name}: ${formatDateValue(r.value, r.prop)} · ${pageTitle(r.db)}` : r.text}</span>
                   </span>
                   {!read && <span className="inbox-dot" />}
                 </button>

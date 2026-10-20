@@ -24,6 +24,7 @@ import { DragIcon, PlusIcon, TriangleIcon } from './Icons'
 import { ActionMenu, EditedFooter, type MenuEntry } from './Menu'
 import { getProfileName } from '../profile'
 import { blockUrl } from '../router'
+import { askNotificationPermission } from '../reminders'
 import { filterMenu, MENU_ITEMS, SlashMenu, type MenuItem } from './SlashMenu'
 import { Columns, MediaBlock, TableBlock, TableOfContents } from './SpecialBlocks'
 
@@ -178,7 +179,32 @@ function mentionItems(query: string, selfPage: string): MenuItem[] {
   const dateItems = dates
     .filter(([n]) => q && n.toLowerCase().startsWith(q))
     .map(([n, d]): MenuItem => ({ key: `date:${dateLabel(d)}`, label: n, hint: dateLabel(d), icon: '📅', aliases: [], section: 'Dates' }))
-  return [...pages, ...dateItems]
+  return [...pages, ...dateItems, ...remindItems(q)]
+}
+
+/** "Remind me …" in the @ menu: puts a ⏰ date in the text and a reminder on the block (shows in the Inbox). */
+function remindItems(q: string): MenuItem[] {
+  if (!q || !['remind me', 'today', 'tomorrow', 'next week'].some((w) => w.startsWith(q) || q.startsWith('remind'))) return []
+  const at = (days: number, hour: number) => {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    d.setHours(hour, 0, 0, 0)
+    return d
+  }
+  const nextMonday = (8 - new Date().getDay()) % 7 || 7
+  const opts: [string, Date][] = [
+    ...(new Date().getHours() < 17 ? [['Today 5:00 PM', at(0, 17)] as [string, Date]] : []),
+    ['Tomorrow 9:00 AM', at(1, 9)],
+    ['Next week 9:00 AM', at(nextMonday, 9)],
+  ]
+  return opts.map(([label, d]): MenuItem => ({
+    key: `date:remind:${d.getTime()}`,
+    label: `Remind me ${label.replace(/^\w/, (c) => c.toLowerCase())}`,
+    hint: d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+    icon: '⏰',
+    aliases: [],
+    section: 'Remind me',
+  }))
 }
 
 interface SlashState {
@@ -443,6 +469,14 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     if (item.key.startsWith('page:')) {
       const target = S().blocks[item.key.slice(5)]
       document.execCommand('insertHTML', false, `<a href="#/${target.id}">${escapeHtml((target.format.icon ?? '📄') + ' ' + pageTitle(target))}</a>&nbsp;`)
+    } else if (item.key.startsWith('date:remind:')) {
+      const at = Number(item.key.slice(12))
+      const when = new Date(at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      document.execCommand('insertText', false, `⏰ ${when} `)
+      save()
+      S().updateBlock(id, { properties: { remind_at: at } })
+      askNotificationPermission()
+      return
     } else document.execCommand('insertText', false, item.key.slice(5) + ' ')
     save()
   }

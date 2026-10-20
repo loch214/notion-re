@@ -9,7 +9,11 @@ import { weekStartsMonday } from '../../shared/dates'
 import { Avatar, photoFromFile, setProfile, useProfile, useProfileName } from '../profile'
 import { Dropdown } from './Dropdown'
 import { Icon, type IconName } from './Icons'
-import { importMarkdown } from './Sidebar'
+import { copyPageLink } from './PageMenu'
+import { askAI } from '../askAI'
+import { importMarkdown, setSidebarPrefs, useSidebarPrefs, type SidebarPrefs } from './Sidebar'
+import { desktopNotifications, NOTIFY_KEY } from '../reminders'
+import { ENTER_NEWLINE_KEY } from './AIPanel'
 
 function Modal({ title, onClose, children, wide }: { title?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
@@ -101,6 +105,7 @@ function PreferencesPane() {
   const rootPages = useStore((st) => st.rootPages)
   const [start, setStart] = useState(() => localStorage.getItem(START_PAGE_KEY) ?? '')
   const [monday, setMonday] = useState(weekStartsMonday)
+  const [enterNewLine, setEnterNewLine] = useState(() => localStorage.getItem(ENTER_NEWLINE_KEY) === '1')
   const pages = rootPages.filter((id) => blocks[id]?.alive)
   return (
     <>
@@ -114,6 +119,17 @@ function PreferencesPane() {
               { value: 'light', label: 'Light' },
               { value: 'dark', label: 'Dark' },
             ]}
+          />
+        </Row>
+      </Section>
+      <Section title="Input options">
+        <Row title="Use Enter to add a new line" desc={<>Applies to the AI chat. Press <b>Ctrl</b> + <b>Enter</b> to send.</>}>
+          <Switch
+            on={enterNewLine}
+            onChange={(v) => {
+              setEnterNewLine(v)
+              localStorage.setItem(ENTER_NEWLINE_KEY, v ? '1' : '0')
+            }}
           />
         </Row>
       </Section>
@@ -142,6 +158,60 @@ function PreferencesPane() {
         </Row>
       </Section>
     </>
+  )
+}
+
+function NotificationsPane() {
+  const [on, setOn] = useState(desktopNotifications)
+  const [perm, setPerm] = useState(() => ('Notification' in window ? Notification.permission : 'denied'))
+  const allow = () => 'Notification' in window && Notification.requestPermission().then(setPerm)
+  return (
+    <>
+      <Section title="Reminders">
+        <Row title="Desktop notifications" desc="Pop up a notification on this computer when a reminder is due. Reminders always land in your Inbox.">
+          <Switch
+            on={on}
+            onChange={(v) => {
+              setOn(v)
+              localStorage.setItem(NOTIFY_KEY, v ? '1' : '0')
+              if (v && perm === 'default') allow()
+            }}
+          />
+        </Row>
+        {on && perm !== 'granted' && (
+          <Row title="Allow notifications" desc={perm === 'denied' ? 'Notifications are blocked for this app in the browser. Allow them in the site settings (the icon left of the address bar).' : 'The browser needs your permission once.'}>
+            <button className="btn" disabled={perm === 'denied'} onClick={allow}>Allow</button>
+          </Row>
+        )}
+        <Row title="Send a test notification" desc="Check that notifications reach you.">
+          <button
+            className="btn"
+            disabled={perm !== 'granted'}
+            onClick={() => new Notification('Notion(RE)', { body: 'Notifications are working.' })}
+          >
+            Test
+          </button>
+        </Row>
+      </Section>
+    </>
+  )
+}
+
+function SidebarPane() {
+  const prefs = useSidebarPrefs()
+  const toggle = (k: keyof SidebarPrefs) => setSidebarPrefs({ ...prefs, [k]: !prefs[k] || undefined })
+  return (
+    <Section title="Sidebar">
+      <Row title="Upcoming events" desc="Dated items from your databases in the next week.">
+        <Switch on={!prefs.upcoming} onChange={() => toggle('upcoming')} />
+      </Row>
+      <Row title="Recents" desc="The pages you opened last.">
+        <Switch on={!prefs.recent} onChange={() => toggle('recent')} />
+      </Row>
+      <Row title="Inbox" desc="Also list the Inbox under Home (it's always in the top bar of the sidebar).">
+        <Switch on={!prefs.inbox} onChange={() => toggle('inbox')} />
+      </Row>
+    </Section>
   )
 }
 
@@ -266,8 +336,20 @@ function ShortcutsPane() {
   )
 }
 
+/** Extra words that find a settings page in "Search settings". */
+const SEARCH_WORDS: Partial<Record<SettingsTab, string>> = {
+  preferences: 'theme dark light appearance enter new line startup open on start week monday language time',
+  notifications: 'reminders desktop alerts inbox',
+  sidebar: 'upcoming events recents inbox customize',
+  ai: 'claude provider model api key file access files folders',
+  import: 'markdown md files',
+  shortcuts: 'keyboard keys hotkeys',
+}
+
 const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub?: string }[] = [
   { id: 'preferences', label: 'Preferences', icon: 'sliders', title: 'Preferences', sub: 'Choose how you want Notion(RE) to look and behave' },
+  { id: 'notifications', label: 'Notifications', icon: 'bell', title: 'Notifications', sub: 'Reminders from dates and "Remind me" mentions' },
+  { id: 'sidebar', label: 'Sidebar', icon: 'sidebar', title: 'Sidebar', sub: 'Choose what shows in your sidebar' },
   { id: 'ai', label: 'AI', icon: 'sparkle', title: 'AI', sub: 'Your own AI, used by the AI panel and inline AI' },
   { id: 'import', label: 'Import', icon: 'import', title: 'Import' },
   { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts' },
@@ -275,6 +357,7 @@ const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub
 
 export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onClose: () => void; tab?: SettingsTab }) {
   const [tab, setTab] = useState<SettingsTab>(firstTab)
+  const [find, setFind] = useState('')
   const name = useProfileName()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.db-popover') && onClose()
@@ -286,13 +369,17 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
     <div className="modal-backdrop settings-backdrop" onMouseDown={onClose}>
       <div className="settings" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="settings-nav">
+          <label className="settings-search">
+            <Icon name="search" size={14} />
+            <input placeholder="Search settings" value={find} onChange={(e) => setFind(e.target.value)} />
+          </label>
           <div className="settings-nav-head">Account</div>
           <button className={`settings-nav-item ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
             <Avatar />
             <span>{name || 'Your account'}</span>
           </button>
           <div className="settings-nav-head">Settings</div>
-          {TABS.map((t) => (
+          {TABS.filter((t) => !find.trim() || `${t.label} ${t.sub ?? ''} ${SEARCH_WORDS[t.id] ?? ''}`.toLowerCase().includes(find.trim().toLowerCase())).map((t) => (
             <button key={t.id} className={`settings-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
               <Icon name={t.icon} size={18} />
               <span>{t.label}</span>
@@ -308,6 +395,8 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
             {info.sub && <p className="settings-sub">{info.sub}</p>}
             {tab === 'account' && <AccountPane />}
             {tab === 'preferences' && <PreferencesPane />}
+            {tab === 'notifications' && <NotificationsPane />}
+            {tab === 'sidebar' && <SidebarPane />}
             {tab === 'ai' && <AIPane />}
             {tab === 'import' && <ImportPane />}
             {tab === 'shortcuts' && <ShortcutsPane />}
@@ -321,8 +410,13 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
 export function SearchModal({ onClose }: { onClose: () => void }) {
   const blocks = useStore((s) => s.blocks)
   const openPage = useStore((s) => s.openPage)
+  const rootPages = useStore((s) => s.rootPages)
+  const name = useProfileName()
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
+  const [titleOnly, setTitleOnly] = useState(false)
+  const [inPage, setInPage] = useState('')
+  const [sort, setSort] = useState<'edited' | 'oldest' | 'best'>('best')
   const inputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     inputRef.current?.focus()
@@ -339,56 +433,143 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
       for (let b = blocks[id]; b; b = blocks[b.parent_id!]) if (!b.alive) return false
       return true
     }
-    const seen = new Map<string, string>()
+    const within = (id: string) => {
+      if (!inPage) return true
+      for (let b = blocks[id]; b; b = blocks[b.parent_id!]) if (b.id === inPage) return true
+      return false
+    }
+    const seen = new Map<string, { snippet: string; title: boolean }>()
     for (const b of Object.values(blocks)) {
-      if (!isAlive(b.id)) continue
+      if (!isAlive(b.id) || !within(b.id)) continue
+      if ((!query || titleOnly) && b.type !== 'page') continue
       const text = b.type === 'page' ? b.properties.title : htmlToText(b.properties.title)
       if (query && !text.toLowerCase().includes(query)) continue
-      if (!query && b.type !== 'page') continue
       const pid = pageOf(b.id)
-      if (pid && !seen.has(pid)) seen.set(pid, b.type === 'page' ? '' : text)
+      if (!pid) continue
+      const old = seen.get(pid)
+      if (!old || (b.type === 'page' && !old.title)) seen.set(pid, { snippet: b.type === 'page' ? old?.snippet ?? '' : text, title: b.type === 'page' || !!old?.title })
     }
-    return [...seen.entries()]
-      .map(([id, snippet]) => ({ id, snippet }))
-      .sort((a, b) => blocks[b.id].last_edited_time - blocks[a.id].last_edited_time)
-      .slice(0, 30)
-  }, [q, blocks])
+    const list = [...seen.entries()].map(([id, r]) => ({ id, ...r }))
+    const t = (id: string) => blocks[id].last_edited_time
+    list.sort((a, b) => (sort === 'oldest' ? t(a.id) - t(b.id) : sort === 'best' && query ? +b.title - +a.title || t(b.id) - t(a.id) : t(b.id) - t(a.id)))
+    return list.slice(0, 40)
+  }, [q, blocks, titleOnly, inPage, sort])
+
+  // Without a query, recent pages are grouped by when they were edited (Notion's Today / Yesterday / …).
+  const groupOf = (ms: number) => {
+    const day = 86_400_000
+    const today = new Date().setHours(0, 0, 0, 0)
+    return ms >= today ? 'Today' : ms >= today - day ? 'Yesterday' : ms >= today - 7 * day ? 'Past week' : ms >= today - 30 * day ? 'Past 30 days' : 'Older'
+  }
+  const query = q.trim()
+  const askRow = query ? 1 : 0
+  const total = results.length + askRow
 
   const go = (id: string) => {
     openPage(id)
     onClose()
   }
+  const pick = (i: number) => {
+    if (askRow && i === 0) {
+      onClose()
+      askAI(query)
+    } else if (results[i - askRow]) go(results[i - askRow].id)
+  }
+  const mark = (text: string) => {
+    const i = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1
+    if (i < 0) return text
+    return (
+      <>
+        {text.slice(0, i)}
+        <b>{text.slice(i, i + query.length)}</b>
+        {text.slice(i + query.length)}
+      </>
+    )
+  }
 
+  let lastGroup = ''
   return (
     <Modal onClose={onClose} wide>
-      <input
-        ref={inputRef}
-        className="search-input"
-        placeholder="Search pages and content…"
-        value={q}
-        onChange={(e) => {
-          setQ(e.target.value)
-          setActive(0)
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') setActive((a) => Math.min(a + 1, results.length - 1))
-          if (e.key === 'ArrowUp') setActive((a) => Math.max(a - 1, 0))
-          if (e.key === 'Enter' && results[active]) go(results[active].id)
-        }}
-      />
+      <div className="search-head">
+        <Icon name="search" size={18} />
+        <input
+          ref={inputRef}
+          className="search-input"
+          placeholder={`Search or ask a question in ${name ? `${name}'s` : 'your'} Notion…`}
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value)
+            setActive(0)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') setActive((a) => Math.min(a + 1, total - 1))
+            else if (e.key === 'ArrowUp') setActive((a) => Math.max(a - 1, 0))
+            else if (e.key === 'Enter') pick(active)
+            else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l' && results[active - askRow]) {
+              copyPageLink(results[active - askRow].id)
+            } else return
+            e.preventDefault()
+          }}
+        />
+      </div>
+      <div className="search-filters">
+        <button className={`search-chip ${titleOnly ? 'on' : ''}`} onClick={() => setTitleOnly(!titleOnly)}>
+          <span className="search-chip-aa">Aa</span> Title only
+        </button>
+        <Dropdown
+          value={inPage}
+          width={240}
+          className={`search-chip ${inPage ? 'on' : ''}`}
+          onChange={setInPage}
+          options={[{ value: '', label: 'In: all pages' }, ...rootPages.filter((id) => blocks[id]?.alive).map((id) => ({ value: id, label: `In: ${pageTitle(blocks[id])}` }))]}
+        />
+        <Dropdown
+          value={sort}
+          width={200}
+          className="search-chip"
+          onChange={setSort}
+          options={[
+            { value: 'best', label: 'Sort: Best matches' },
+            { value: 'edited', label: 'Sort: Last edited' },
+            { value: 'oldest', label: 'Sort: Oldest first' },
+          ]}
+        />
+      </div>
       <div className="search-results">
-        {results.length === 0 && <div className="menu-empty">No results</div>}
-        {results.map((r, i) => (
-          <div key={r.id} className={`menu-item ${i === active ? 'active' : ''}`} onMouseEnter={() => setActive(i)} onClick={() => go(r.id)}>
-            <span className="menu-icon">{blocks[r.id].format.icon ?? '📄'}</span>
-            <span>
-              <div className="menu-label">{pageTitle(blocks[r.id])}</div>
-              <div className="menu-hint">
-                {r.snippet ? r.snippet.slice(0, 90) : pagePath(blocks, r.id).slice(0, -1).map((p) => pageTitle(p)).join(' / ')}
-              </div>
+        {askRow > 0 && (
+          <div className={`menu-item search-ask ${active === 0 ? 'active' : ''}`} onMouseEnter={() => setActive(0)} onClick={() => pick(0)}>
+            <span className="search-row-icon"><Icon name="sparkle" size={18} /></span>
+            <span className="menu-label">
+              Ask AI: <b>{query}</b>
             </span>
           </div>
-        ))}
+        )}
+        {results.length === 0 && <div className="menu-empty">No results</div>}
+        {results.map((r, i) => {
+          const group = query ? 'Best matches' : groupOf(blocks[r.id].last_edited_time)
+          const head = group !== lastGroup ? ((lastGroup = group), <div className="menu-section">{group}</div>) : null
+          const path = pagePath(blocks, r.id).slice(0, -1).map((p) => pageTitle(p)).join(' / ')
+          return (
+            <div key={r.id}>
+              {head}
+              <div className={`menu-item search-row ${i + askRow === active ? 'active' : ''}`} onMouseEnter={() => setActive(i + askRow)} onClick={() => go(r.id)}>
+                <span className="search-row-icon">{blocks[r.id].format.icon ?? <Icon name="page" size={18} />}</span>
+                <span className="search-row-text">
+                  <span className="menu-label">{mark(pageTitle(blocks[r.id]))}</span>
+                  {path && <span className="search-row-path"> — {path}</span>}
+                  {r.snippet && <div className="menu-hint">{mark(r.snippet.slice(0, 120))}</div>}
+                </span>
+                <span className="search-row-date">{new Date(blocks[r.id].last_edited_time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="search-foot">
+        <span><kbd>↑↓</kbd> Select</span>
+        <span><kbd>↵</kbd> Open</span>
+        <span><kbd>Ctrl+L</kbd> Copy link</span>
+        <span><kbd>Esc</kbd> Close</span>
       </div>
     </Modal>
   )

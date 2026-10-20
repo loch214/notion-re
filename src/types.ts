@@ -53,6 +53,8 @@ export interface Block {
     bookmark?: { title?: string; description?: string; icon?: string; image?: string }
     /** Database rows: reminders per date property, in minutes before the start (see shared/dates.ts). */
     reminders?: Record<string, number>
+    /** Text blocks: a reminder set from an @ mention ("Remind me tomorrow 9 AM"), as a time in ms. */
+    remind_at?: number
     /** Database rows: the row this one is a sub-item of (Notion's "Sub-items"). */
     parent_row?: string
   }

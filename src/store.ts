@@ -56,6 +56,8 @@ interface State {
 
   load: () => Promise<void>
   mergeRemote: (remote: Workspace) => void
+  /** Restore from a backup: blocks missing here or older here are put back (one undo step); returns how many. */
+  mergeBlocks: (incoming: Block[]) => number
   openPage: (id: string | null) => void
   requestFocus: (f: FocusRequest | null) => void
   /** Blocks picked with Esc / Shift+click / drag-select (see BlockSelection.tsx). */
@@ -464,6 +466,22 @@ export const useStore = create<State>((set, get) => {
         ? recordHistory(diffBlocks(s.blocks, blocks), s.rootPages, rootsChanged ? roots : s.rootPages, checkpoint)
         : false
       set({ blocks, rootPages: rootsChanged ? roots : s.rootPages, currentPageId, ...(recorded ? { historyTick: s.historyTick + 1 } : {}) })
+    },
+
+    mergeBlocks: (incoming) => {
+      let n = 0
+      mutate((blocks, s) => {
+        for (const b of incoming) {
+          if (!b?.id || typeof b.type !== 'string') continue
+          const here = blocks[b.id]
+          if (here && here.last_edited_time >= b.last_edited_time) continue
+          blocks[b.id] = { ...b, last_edited_time: Date.now() }
+          n++
+        }
+        const roots = incoming.filter((b) => b?.parent_id === null && b.type === 'page').map((b) => b.id)
+        return { rootPages: normalizeRoots(blocks, [...s.rootPages, ...roots.filter((id) => !s.rootPages.includes(id))]) }
+      })
+      return n
     },
 
     openPage: (id) => {

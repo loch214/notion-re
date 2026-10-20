@@ -14,6 +14,7 @@ import { askAI } from '../askAI'
 import { importMarkdown, setSidebarPrefs, useSidebarPrefs, type SidebarPrefs } from './Sidebar'
 import { desktopNotifications, NOTIFY_KEY } from '../reminders'
 import { ENTER_NEWLINE_KEY } from './AIPanel'
+import { exportAllMarkdown, exportBackup, restoreBackup } from '../exportAll'
 
 function Modal({ title, onClose, children, wide }: { title?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
@@ -302,7 +303,37 @@ function AIPane() {
 }
 
 function ImportPane() {
+  const [msg, setMsg] = useState('')
   return (
+    <>
+    <Section title="Export">
+      <Row title="Export all pages" desc="Every page as a Markdown file in one .zip, in folders like your sidebar.">
+        <button className="btn" onClick={() => setMsg(`Exported ${exportAllMarkdown()} pages.`)}>Export</button>
+      </Row>
+      <Row title="Back up workspace" desc="Everything (pages, databases, views, trash) in one file you can restore later.">
+        <button className="btn" onClick={exportBackup}>Download backup</button>
+      </Row>
+      <Row title="Restore from backup" desc={msg || 'Puts back pages from a backup file. Nothing here is deleted; pages edited here since the backup are kept.'}>
+        <label className="btn">
+          Choose file
+          <input
+            type="file"
+            accept=".json"
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (!f) return
+              try {
+                setMsg(`Restored ${await restoreBackup(f)} blocks. Undo with Ctrl+Z.`)
+              } catch (err: any) {
+                setMsg(err.message)
+              }
+            }}
+          />
+        </label>
+      </Row>
+    </Section>
     <Section title="Import">
       <Row title="Markdown" desc="Each .md file becomes a new page. The first # heading becomes its title.">
         <label className="btn">
@@ -320,6 +351,7 @@ function ImportPane() {
         </label>
       </Row>
     </Section>
+    </>
   )
 }
 
@@ -342,7 +374,7 @@ const SEARCH_WORDS: Partial<Record<SettingsTab, string>> = {
   notifications: 'reminders desktop alerts inbox',
   sidebar: 'upcoming events recents inbox customize',
   ai: 'claude provider model api key file access files folders',
-  import: 'markdown md files',
+  import: 'markdown md files export backup restore zip download',
   shortcuts: 'keyboard keys hotkeys',
 }
 
@@ -351,7 +383,7 @@ const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub
   { id: 'notifications', label: 'Notifications', icon: 'bell', title: 'Notifications', sub: 'Reminders from dates and "Remind me" mentions' },
   { id: 'sidebar', label: 'Sidebar', icon: 'sidebar', title: 'Sidebar', sub: 'Choose what shows in your sidebar' },
   { id: 'ai', label: 'AI', icon: 'sparkle', title: 'AI', sub: 'Your own AI, used by the AI panel and inline AI' },
-  { id: 'import', label: 'Import', icon: 'import', title: 'Import' },
+  { id: 'import', label: 'Import & export', icon: 'import', title: 'Import & export' },
   { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts' },
 ]
 

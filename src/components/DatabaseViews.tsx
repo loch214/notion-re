@@ -2,7 +2,7 @@
 // and the non-table layouts. Modelled on Notion's collection views (analysis/databases.md).
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { Icon, PlusIcon } from './Icons'
+import { Icon, PlusIcon, type IconName } from './Icons'
 import { openRow } from './Peek'
 import { addDays, daysBetween, endDay, formatDateValue, formatTime, isoDay, moveDate, parseDate, RELATIVE_DAYS, shiftDate, startDay, toDate, todayIso, weekStartsMonday, WITHIN } from '../../shared/dates'
 import { cellRaw, coverCss, dbTemplates, htmlToPlain, isSingleChoice, shortId, statusOptions } from '../../shared/blocks.ts'
@@ -20,6 +20,8 @@ function updateView(db: Block, viewId: string, patch: Partial<DbView> | null) {
   S().updateBlock(db.id, { views: next })
 }
 
+const VIEW_ICONS: Record<string, IconName> = { table: 'tableView', board: 'board', list: 'list', gallery: 'gallery', calendar: 'calendar', timeline: 'timeline' }
+
 function viewKey(dbId: string) {
   return `notion-re:view:${dbId}`
 }
@@ -36,7 +38,14 @@ export function DatabaseView({ dbId }: { dbId: string }) {
 
   const views = db?.schema ? getViews(db) : []
   const view = views.find((v) => v.id === activeId) ?? views[0]
-  const rows = useMemo(() => (db?.schema && view ? applyView(blocks, db, view) : []), [blocks, db, view])
+  const [searching, setSearching] = useState(false)
+  const [find, setFind] = useState('')
+  const rows = useMemo(() => {
+    const all = db?.schema && view ? applyView(blocks, db, view) : []
+    const q = find.trim().toLowerCase()
+    // The toolbar's search box: rows whose name or any cell contains the text.
+    return q ? all.filter((r) => `${r.properties.title} ${Object.values(r.properties.cells ?? {}).join(' ')}`.toLowerCase().includes(q)) : all
+  }, [blocks, db, view, find])
   if (!db?.schema || !view) return null
 
   /** New row that shows up in this view, optionally with extra values (board column, calendar day). */
@@ -61,16 +70,31 @@ export function DatabaseView({ dbId }: { dbId: string }) {
             onClick={(e) => (v.id === view.id ? open('view')(e) : setActiveId(v.id))}
             title={v.id === view.id ? 'View options' : undefined}
           >
-            {VIEW_TYPES.find((t) => t.type === v.type)?.icon} {v.name}
+            <Icon name={VIEW_ICONS[v.type]} size={16} /> {v.name}
           </button>
         ))}
-        <button className="db-view-tab" title="Add a view" onClick={open('add')}>＋</button>
-        <span style={{ flex: 1 }} />
-        <button className={`db-tool ${view.filter.filters.length ? 'on' : ''}`} onClick={open('filter')}>
-          Filter{view.filter.filters.length ? ` · ${view.filter.filters.length}` : ''}
+        <button className="db-view-tab db-view-add" title="Add a view" onClick={open('add')}>
+          <PlusIcon />
         </button>
-        <button className={`db-tool ${view.sort.length ? 'on' : ''}`} onClick={open('sort')}>
-          Sort{view.sort.length ? ` · ${view.sort.length}` : ''}
+        <span style={{ flex: 1 }} />
+        <button className={`ctl db-tool ${view.filter.filters.length ? 'on' : ''}`} title={view.filter.filters.length ? `Filter · ${view.filter.filters.length}` : 'Filter'} onClick={open('filter')}>
+          <Icon name="filter" size={16} />
+        </button>
+        <button className={`ctl db-tool ${view.sort.length ? 'on' : ''}`} title={view.sort.length ? `Sort · ${view.sort.length}` : 'Sort'} onClick={open('sort')}>
+          <Icon name="sort" size={16} />
+        </button>
+        {searching ? (
+          <span className="db-search">
+            <Icon name="search" size={14} />
+            <input autoFocus placeholder="Type to search…" value={find} onChange={(e) => setFind(e.target.value)} onBlur={() => !find && setSearching(false)} onKeyDown={(e) => e.key === 'Escape' && (setFind(''), setSearching(false))} />
+          </span>
+        ) : (
+          <button className="ctl db-tool" title="Search" onClick={() => setSearching(true)}>
+            <Icon name="search" size={16} />
+          </button>
+        )}
+        <button className="ctl db-tool" title="View settings" onClick={open('view')}>
+          <Icon name="sliders" size={16} />
         </button>
         <span className="db-new-split">
           <button className="btn primary small" onClick={() => openRow(newRow(), view)}>New</button>
@@ -102,7 +126,7 @@ export function DatabaseView({ dbId }: { dbId: string }) {
                 setMenu(null)
               }}
             >
-              <span className="db-type-icon">{t.icon}</span> {t.label}
+              <span className="db-type-icon"><Icon name={VIEW_ICONS[t.type]} size={16} /></span> {t.label}
             </div>
           ))}
         </Popover>
@@ -447,7 +471,7 @@ function CardProps({ db, row, view, skip }: { db: Block; row: Block; view: DbVie
           const ids = Array.isArray(v) ? v : [String(v)]
           return (
             <div key={p.id} className="db-card-prop">
-              {ids.map((id) => p.options?.find((o) => o.id === id)).filter(Boolean).map((o) => <Pill key={o!.id} option={o!} />)}
+              {ids.map((id) => p.options?.find((o) => o.id === id)).filter(Boolean).map((o) => <Pill key={o!.id} option={o!} dot={p.type === 'status'} />)}
             </div>
           )
         }
@@ -582,6 +606,7 @@ function GalleryBody({ db, rows, view, newRow }: BodyProps) {
 function CalendarBody({ db, rows, view, newRow }: BodyProps) {
   const week = view.calendar_range === 'week'
   const [anchor, setAnchor] = useState(() => todayIso())
+  const [noDate, setNoDate] = useState<DOMRect | null>(null)
   const prop = db.schema!.find((p) => p.id === view.calendar_by && p.type === 'date')
   if (!prop) {
     return (
@@ -613,12 +638,41 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
     }
   }
   const title = toDate(week ? first : monthFirst).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  // Notion's "No date" list: rows without a date; drag one onto a day to give it that date.
+  const undated = rows.filter((r) => !startDay(cellRaw(prop, r)))
 
   return (
     <div className={`db-calendar ${week ? 'week' : ''}`}>
       <div className="db-cal-head">
         <b>{title}</b>
         <span style={{ flex: 1 }} />
+        {undated.length > 0 && (
+          <button className={`db-cal-today ${noDate ? 'on' : ''}`} onClick={(e) => setNoDate(noDate ? null : e.currentTarget.getBoundingClientRect())}>
+            No date ({undated.length})
+          </button>
+        )}
+        {noDate && (
+          <Popover anchor={noDate} onClose={() => setNoDate(null)} width={260}>
+            <div className="menu-section">No date · drag onto a day</div>
+            {undated.map((r) => (
+              <div
+                key={r.id}
+                className="menu-item compact"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-db-row', r.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onClick={() => {
+                  setNoDate(null)
+                  openRow(r.id, view)
+                }}
+              >
+                {r.format.icon ?? <Icon name="page" size={16} />} {pageTitle(r)}
+              </div>
+            ))}
+          </Popover>
+        )}
         <span className="db-cal-mode">
           <button className={week ? '' : 'on'} onClick={() => updateView(db, view.id, { calendar_range: undefined })}>Month</button>
           <button className={week ? 'on' : ''} onClick={() => updateView(db, view.id, { calendar_range: 'week' })}>Week</button>

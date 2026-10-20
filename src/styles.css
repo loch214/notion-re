@@ -1192,3 +1192,19 @@ img.avatar { object-fit: cover; padding: 0; }
 .settings-search { display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 4px 10px; padding: 0 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border); color: var(--muted); }
 .settings-search:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px rgba(35, 131, 226, .25); }
 .settings-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; }
+/* Database toolbar and view tabs like Notion's (Session 11) */
+.db-views { border-bottom: 1px solid var(--divider, var(--border)); padding-bottom: 6px; gap: 2px; }
+.db-view-tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; color: var(--muted); font-weight: 500; }
+.db-view-tab svg { flex-shrink: 0; }
+.db-view-tab.active { color: var(--text); background: var(--bg-hover); box-shadow: none; border-radius: 14px; }
+.db-view-add { padding: 0 8px; color: var(--faint); }
+.db-tool { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; color: var(--icon, var(--muted)); border-radius: 6px; }
+.db-tool.on { color: var(--accent); }
+.db-search { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); }
+.db-search input { width: 140px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; }
+.db-new-split { margin-left: 6px; }
+.db-pill.status { border-radius: 10px; padding: 0 8px 0 6px; gap: 5px; }
+.db-pill-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .85; flex-shrink: 0; }
+.db-cal-today.on { background: var(--bg-hover); }
+.db-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.db-scroll:hover { scrollbar-color: var(--scrollbar, rgba(135,131,120,.4)) transparent; }

@@ -87,6 +87,11 @@ const PATHS = {
   fullWidth: 'M2.5 10h15M5.5 7l-3 3 3 3M14.5 7l3 3-3 3',
   smallText: 'M3 14.5 6.5 5h1l3.5 9.5M4.3 11h5.4M15 6v8.5M13 12.5l2 2 2-2',
   unlock: 'M5.5 9h9v7.5h-9ZM7.3 9V6.8a2.7 2.7 0 0 1 5.3-.8',
+  filter: 'M3.5 6h13M6 10h8M8.5 14h3',
+  sort: 'M6.5 4v12M3.5 7l3-3 3 3M13.5 16V4M10.5 13l3 3 3-3',
+  tableView: 'M3.5 4.5h13v11h-13ZM3.5 8.5h13M3.5 12h13M8 8.5v7',
+  board: 'M3.5 4.5h3.5v9H3.5ZM8.3 4.5h3.5v6H8.3ZM13 4.5h3.5v11H13Z',
+  gallery: 'M3.5 4.5h5.5v5H3.5ZM11 4.5h5.5v5H11ZM3.5 11.5h5.5v4H3.5ZM11 11.5h5.5v4H11Z',
   question: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM7.8 8a2.3 2.3 0 0 1 4.4.8c0 1.6-2.2 1.8-2.2 3.3M10 14.3h.01',
 } as const
 

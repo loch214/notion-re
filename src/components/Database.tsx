@@ -259,7 +259,7 @@ function TitleCell({ row, view, depth, hasKids, open, onToggle, onAddSub }: {
       <button className={`ctl db-sub-toggle ${hasKids ? 'has' : ''} ${open ? 'open' : ''}`} title={hasKids ? (open ? 'Hide sub-items' : 'Show sub-items') : 'Add a sub-item'} onClick={hasKids ? onToggle : onAddSub}>
         {hasKids ? <TriangleIcon size={10} /> : <PlusIcon size={10} />}
       </button>
-      <span className="db-row-icon">{row.format.icon ?? '📄'}</span>
+      {row.format.icon && <span className="db-row-icon">{row.format.icon}</span>}
       <TextInput
         value={row.properties.title}
         placeholder="Untitled"
@@ -395,9 +395,10 @@ export function Cell({ prop, row, dbId }: { prop: DbProperty; row: Block; dbId: 
   }
 }
 
-export function Pill({ option, onRemove }: { option: SelectOption; onRemove?: () => void }) {
+export function Pill({ option, onRemove, dot }: { option: SelectOption; onRemove?: () => void; dot?: boolean }) {
   return (
-    <span className={`db-pill opt-${option.color}`}>
+    <span className={`db-pill opt-${option.color} ${dot ? 'status' : ''}`}>
+      {dot && <span className="db-pill-dot" />}
       {option.name}
       {onRemove && (
         <button
@@ -445,7 +446,7 @@ function SelectCell({ prop, value, onChange, dbId }: { prop: DbProperty; value: 
   return (
     <>
       <div className="db-select" onClick={(e) => setRect(e.currentTarget.getBoundingClientRect())}>
-        {chosen.length ? chosen.map((o) => <Pill key={o.id} option={o} />) : <span className="db-empty">Empty</span>}
+        {chosen.length ? chosen.map((o) => <Pill key={o.id} option={o} dot={prop.type === 'status'} />) : <span className="db-empty">Empty</span>}
       </div>
       {rect && (
         <Popover anchor={rect} onClose={() => { setRect(null); setQuery('') }} width={260}>

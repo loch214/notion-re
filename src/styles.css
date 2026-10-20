@@ -1390,3 +1390,7 @@ td.library-name { color: var(--text); font-weight: 500; display: flex; align-ite
 td.library-src { color: var(--text); }
 td.library-src svg { vertical-align: -2px; color: var(--muted); }
 .library-empty { padding: 32px 8px; color: var(--muted); font-size: 14px; }
+.sidebar-dock { flex-shrink: 0; overflow: hidden; transition: width .2s ease; height: 100%; }
+.sidebar-dock.resizing { transition: none; }
+.sidebar-dock > .sidebar { height: 100%; }
+@media (prefers-reduced-motion: reduce) { .sidebar-dock { transition: none; } }

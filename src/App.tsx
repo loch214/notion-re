@@ -66,7 +66,7 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>()
   const announcement = useStore((s) => s.announcement)
   const [inboxLeft, setInboxLeft] = useState<number | null>(null)
-  const openInbox = useCallback(() => setInboxLeft(document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0), [])
+  const openInbox = useCallback(() => setInboxLeft(document.querySelector('.sidebar-dock')?.getBoundingClientRect().right ?? 0), [])
   useReminderTicker(openInbox)
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const side = document.querySelector('.sidebar')
+    const side = document.querySelector('.sidebar-dock')
     if (!side) return setSideRight(0)
     const ro = new ResizeObserver(() => setSideRight(side.getBoundingClientRect().right))
     ro.observe(side)
@@ -160,8 +160,9 @@ export default function App() {
 
   return (
     <div className="app">
-      {sidebarOpen && (
+      {(
         <Sidebar
+          open={sidebarOpen}
           onSearch={() => setModal('search')}
           onSettings={(tab) => {
             setSettingsTab(tab)

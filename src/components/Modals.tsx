@@ -646,7 +646,7 @@ export function TrashModal({ onClose }: { onClose: () => void }) {
     }
   }, [onClose])
 
-  const side = document.querySelector('.sidebar')?.getBoundingClientRect()
+  const side = document.querySelector('.sidebar-dock')?.getBoundingClientRect()
   return (
     <div ref={ref} className="popover trash-pop" style={{ left: side && side.width > 0 ? side.right + 4 : 12 }}>
       <div className="trash-search">

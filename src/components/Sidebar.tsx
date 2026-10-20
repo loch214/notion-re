@@ -13,6 +13,7 @@ import { getProfileName } from '../profile'
 import { useUnreadCount } from './Inbox'
 
 interface Props {
+  open?: boolean
   onSearch: () => void
   onSettings: (tab?: 'account' | 'sidebar') => void
   onShortcuts: () => void
@@ -120,7 +121,7 @@ export async function importMarkdown(files: FileList) {
   }
 }
 
-export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTemplates, onCollapse, onShortcuts }: Props) {
+export function Sidebar({ open = true, onSearch, onSettings, onTrash, onAI, onInbox, onTemplates, onCollapse, onShortcuts }: Props) {
   const unread = useUnreadCount()
   const rootPages = useStore((s) => s.rootPages)
   const blocks = useStore((s) => s.blocks)
@@ -137,12 +138,16 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
     .slice(0, 5)
   const [width, setWidth] = useState(() => Math.min(480, Math.max(200, +(localStorage.getItem(WIDTH_KEY) ?? 240))))
   const [shut, setShut] = useState<Record<string, boolean>>({})
+  // Dragging the edge must follow the mouse, so the open / close animation is off meanwhile.
+  const [resizing, setResizing] = useState(false)
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault()
+    setResizing(true)
     const move = (m: MouseEvent) => setWidth(Math.min(480, Math.max(200, m.clientX)))
     const up = (m: MouseEvent) => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      setResizing(false)
       localStorage.setItem(WIDTH_KEY, String(Math.min(480, Math.max(200, m.clientX))))
     }
     window.addEventListener('mousemove', move)
@@ -165,6 +170,8 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
   )
 
   return (
+    // Like Notion, closing / opening the sidebar animates its width (0.2s ease) and the page follows.
+    <div className={`sidebar-dock ${resizing ? 'resizing' : ''}`} style={{ width: open ? width : 0 }} aria-hidden={!open}>
     <aside className="sidebar" style={{ width }}>
       <div className="side-resizer" onMouseDown={startResize} />
       <div className="ws-header">
@@ -319,6 +326,7 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
         )}
       </div>
     </aside>
+    </div>
   )
 }
 

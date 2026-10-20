@@ -560,14 +560,14 @@ function ListBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className="db-list">
       {rows.map((r) => (
-        <div key={r.id} className="db-list-row" onClick={() => openRow(r.id, view)}>
-          <span className="db-row-icon">{r.format.icon ?? '📄'}</span>
+        <div key={r.id} className="db-list-row" onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
+          {r.format.icon && <span className="db-row-icon">{r.format.icon}</span>}
           <span className="db-list-title">{pageTitle(r)}</span>
           <span style={{ flex: 1 }} />
           <CardProps db={db} row={r} view={view} />
         </div>
       ))}
-      <button className="db-new-row" onClick={() => openRow(newRow(), view)}>＋ New</button>
+      <button className="db-new-row" onClick={() => openRow(newRow(), view)}>＋ New page</button>
     </div>
   )
 }
@@ -810,7 +810,7 @@ function TimelineBody({ db, rows, view, newRow }: BodyProps) {
         <div className="db-tl-names">
           <div className="db-tl-names-head">{db.schema!.find((p) => p.type === 'title')?.name ?? 'Name'}</div>
           {rows.map((r) => (
-            <div key={r.id} className="db-tl-name" onClick={() => openRow(r.id, view)}>
+            <div key={r.id} className="db-tl-name" onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
               {r.format.icon ? <span>{r.format.icon}</span> : <Icon name="page" size={16} />}
               <span className="db-tl-name-text">{pageTitle(r)}</span>
             </div>

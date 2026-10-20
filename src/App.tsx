@@ -264,6 +264,7 @@ export default function App() {
       {aiMounted && (
         <div className={`ai-dock ${aiFull ? 'full' : aiMode} ${aiShown ? 'open' : ''}`} style={{ '--ai-full-left': `${sideRight}px` } as React.CSSProperties}>
           <AIPanel
+            open={aiOpen}
             mode={aiFull ? 'full' : aiMode}
             onMode={(m) => {
               setAiFull(false)

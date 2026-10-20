@@ -1,8 +1,8 @@
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { activeModel, answerPermission, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage, type PermissionRequest } from '../ai'
-import { markdownToBlocks, pageToMarkdown } from '../markdown'
-import { ASK_AI_EVENT, takePendingPrompt } from '../askAI'
+import { htmlToText, markdownToBlocks, pageToMarkdown } from '../markdown'
+import { ASK_AI_EVENT, recentBlock, takePendingPrompt } from '../askAI'
 import { hasNamedStep, isServerMode, pageTitle, useStore } from '../store'
 import { Icon, PlusIcon, type IconName } from './Icons'
 import { Markdown } from './Markdown'
@@ -68,7 +68,7 @@ const MODES: [AIMode, string, IconName][] = [
   ['full', 'Full screen', 'modeFull'],
 ]
 
-export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; onMode: (m: AIMode) => void; onClose: () => void; onSettings: () => void }) {
+export function AIPanel({ open, mode, onMode, onClose, onSettings }: { open: boolean; mode: AIMode; onMode: (m: AIMode) => void; onClose: () => void; onSettings: () => void }) {
   const settings = useStore((s) => s.settings)
   const pageId = useStore((s) => s.currentPageId)
   const page = useStore((s) => (pageId ? s.blocks[pageId] : undefined))
@@ -82,6 +82,14 @@ export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; o
   const [dragging, setDragging] = useState(false)
   const [picker, setPicker] = useState<{ fromAt: boolean } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Opening the chat while you're in a block attaches that block, like Notion ("AI ▸ <block>").
+  const [focusBlock, setFocusBlock] = useState<string | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const id = recentBlock()
+    const b = id ? useStore.getState().blocks[id] : undefined
+    setFocusBlock(b?.alive && b.type !== 'page' && htmlToText(b.properties.title ?? '').trim() ? id : null)
+  }, [open])
   const [menu, setMenu] = useState<{ kind: 'mode' | 'plus' | 'approval'; rect: DOMRect } | null>(null)
   const openMenu = (kind: 'mode' | 'plus' | 'approval') => (e: React.MouseEvent) => setMenu(menu?.kind === kind ? null : { kind, rect: e.currentTarget.getBoundingClientRect() })
   const [chatId, setChatId] = useState(() => localStorage.getItem(OPEN_CHAT_KEY) ?? newId())
@@ -189,6 +197,9 @@ export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; o
     const pages = attached.filter((id) => blocks[id]?.alive && id !== pageId)
     const sentFiles = files.filter((f) => f.url)
     setFiles([])
+    const fb = focusBlock ? blocks[focusBlock] : undefined
+    const focus = fb?.alive ? { id: fb.id, text: htmlToText(fb.properties.title ?? '').slice(0, 300) } : null
+    setFocusBlock(null)
     const history: PanelMessage[] = [...messages, { role: 'user', content: text, pages: pages.length ? pages : undefined, files: sentFiles.length ? sentFiles : undefined }]
     // Like Notion AI's per-turn undo: everything Claude changes in this reply is one named undo step.
     const undoName = agent ? `ai-turn-${Date.now()}` : undefined
@@ -204,6 +215,7 @@ export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; o
         let message = text
         if (pages.length) message += `\n\n(Attached pages for context — read them with read_page: ${pages.map((id) => `"${pageTitle(blocks[id])}" (id: ${id})`).join(', ')})`
         if (names) message += `\n\n(I attached: ${names})`
+        if (focus) message += `\n\n(I'm pointing at this block on the page [${focus.id}]: "${focus.text}")`
         sessionId.current = await claudeChat(
           {
             message,
@@ -239,6 +251,7 @@ export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; o
     const context = [
       ...(pageId ? [`Current page:\n<page>\n${pageToMarkdown(blocks, pageId)}\n</page>`] : []),
       ...pages.map((id) => `Attached page "${pageTitle(blocks[id])}":\n<page>\n${pageToMarkdown(blocks, id)}\n</page>`),
+      ...(focus ? [`The user selected this block: "${focus.text}"`] : []),
     ].join('\n\n')
     // The pages are attached to the latest question so answers reflect current edits.
     const withContext = history.map(({ role, content }, i) =>
@@ -392,6 +405,12 @@ export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; o
             }}
           >
             <div className="ai-chips">
+              {focusBlock && useStore.getState().blocks[focusBlock] && (
+                <span className="ai-chip ai-block-chip" title="This block is sent as context">
+                  <Icon name="sparkle" size={12} /> {htmlToText(useStore.getState().blocks[focusBlock].properties.title ?? '').slice(0, 32)}
+                  <button type="button" className="ai-chip-x" title="Remove" onClick={() => setFocusBlock(null)}>×</button>
+                </span>
+              )}
               {attached.filter((id) => id !== pageId).map((id) => (
                 <PageChip key={id} id={id} onRemove={() => setAttached(attached.filter((x) => x !== id))} />
               ))}

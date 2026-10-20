@@ -1394,3 +1394,6 @@ td.library-src svg { vertical-align: -2px; color: var(--muted); }
 .sidebar-dock.resizing { transition: none; }
 .sidebar-dock > .sidebar { height: 100%; }
 @media (prefers-reduced-motion: reduce) { .sidebar-dock { transition: none; } }
+.ai-block-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.ai-chip-x { margin-left: 2px; color: var(--muted); font-size: 14px; line-height: 1; }
+.ai-chip-x:hover { color: var(--text); }

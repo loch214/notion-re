@@ -27,6 +27,8 @@
   --code-bg: #f7f6f3;
   --callout-bg: #f0efed;
   --popover: #ffffff;
+  --scroll-thumb: #d3d1cb;
+  --scroll-thumb-hover: #aeaca6;
   --backdrop: rgba(15, 15, 15, 0.6);
   --link-line: rgba(55, 53, 47, 0.25);
   --title-placeholder: rgba(55, 53, 47, 0.15);
@@ -54,6 +56,8 @@
   --code-bg: rgba(255, 255, 255, 0.03);
   --callout-bg: #383836;
   --popover: #252525;
+  --scroll-thumb: #474c50;
+  --scroll-thumb-hover: #5e6366;
   --backdrop: rgba(15, 15, 15, 0.8);
   --link-line: #5a5a5a;
   --title-placeholder: #373737;
@@ -1246,3 +1250,26 @@ img.avatar { object-fit: cover; padding: 0; }
 .picker-top.cover-link { padding: 8px 4px; }
 .cover-scroll .cover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .cover-scroll .cover-swatch { width: auto; height: 64px; }
+
+/* ---- Smoothness pass (Notion desktop feel) ---- */
+/* Scrollbars: thin, no arrow buttons, transparent track, quiet rounded thumb (Notion's thumb colours). */
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: var(--scroll-thumb); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; min-height: 32px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+/* Sidebar, menus and pickers only show their scrollbar while the mouse is over them. */
+.sidebar :not(:hover)::-webkit-scrollbar-thumb, .sidebar:not(:hover)::-webkit-scrollbar-thumb,
+.popover:not(:hover)::-webkit-scrollbar-thumb, .popover :not(:hover)::-webkit-scrollbar-thumb,
+.settings-nav:not(:hover)::-webkit-scrollbar-thumb { background-color: transparent; }
+/* Hover feedback fades like Notion's (20 ms ease-in) instead of snapping; own transitions still win. */
+:where(button, .side-item, .menu-item, .amenu-item, .trash-row, .db-list-row, .search-row, .ctl, .btn) { transition: background-color 20ms ease-in, color 20ms ease-in; }
+/* Menus, popups and dialogs open with a short fade instead of popping in. */
+@keyframes nre-fade-in { from { opacity: 0; transform: translateY(-2px) scale(.985); } }
+@keyframes nre-backdrop-in { from { opacity: 0; } }
+.popover { animation: nre-fade-in 110ms ease-out; transform-origin: top left; }
+.modal-backdrop { animation: nre-backdrop-in 120ms ease-out; }
+.modal { animation: nre-fade-in 140ms ease-out; }
+.toast { animation: nre-backdrop-in 160ms ease-out; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { .popover, .modal, .modal-backdrop, .toast, .peek { animation: none; } html { scroll-behavior: auto; } }

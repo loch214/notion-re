@@ -22,6 +22,7 @@ export function resolvedTheme(): 'light' | 'dark' {
 
 function apply() {
   document.documentElement.dataset.theme = resolvedTheme()
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', resolvedTheme() === 'dark' ? '#202020' : '#f9f8f7')
   listeners.forEach((l) => l())
 }
 

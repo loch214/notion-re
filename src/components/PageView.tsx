@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { COVER_PRESETS, coverCss } from '../../shared/blocks.ts'
-import { pageTitle, useStore } from '../store'
+import { pageTitle, useStore, HOME_ID } from '../store'
 import type { Block } from '../types'
 import { BlockList } from './Block'
 import { CoverPicker, EmojiPicker } from './Pickers'
@@ -69,6 +69,13 @@ export function PageView({ pageId }: { pageId: string }) {
   return (
     <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''} ${f.small_text ? 'small-text' : ''} ${locked ? 'locked' : ''}`}>
       {!isDb && !f.hide_outline && <PageOutline pageId={pageId} />}
+      {!page.alive && (
+        <div className="trash-banner">
+          This page is in Trash.
+          <button className="btn small" onClick={() => S().restorePage(pageId)}>Restore page</button>
+          <button className="btn small" onClick={() => { S().purgePage(pageId); S().openPage(S().rootPages[0] ?? HOME_ID) }}>Delete from Trash</button>
+        </div>
+      )}
       {f.template && page.parent_id && (
         <div className="template-banner">
           You’re editing a template in

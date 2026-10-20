@@ -622,24 +622,64 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** Notion's Trash: a popup beside the sidebar with "Search pages in Trash", each page with where it was,
+ * and Restore / Delete from Trash buttons on hover (delete asks once more, inline). */
 export function TrashModal({ onClose }: { onClose: () => void }) {
   const blocks = useStore((s) => s.blocks)
-  const { restorePage, purgePage } = useStore.getState()
+  const { restorePage, purgePage, openPage } = useStore.getState()
+  const [q, setQ] = useState('')
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const query = q.trim().toLowerCase()
   const trashed = Object.values(blocks)
-    .filter((b) => b.type === 'page' && !b.alive)
+    .filter((b) => b.type === 'page' && !b.alive && (!query || pageTitle(b).toLowerCase().includes(query)))
     .sort((a, b) => b.last_edited_time - a.last_edited_time)
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && onClose()
+    addEventListener('keydown', onKey)
+    addEventListener('mousedown', onDown)
+    return () => {
+      removeEventListener('keydown', onKey)
+      removeEventListener('mousedown', onDown)
+    }
+  }, [onClose])
+
+  const side = document.querySelector('.sidebar')?.getBoundingClientRect()
   return (
-    <Modal title="Trash" onClose={onClose}>
-      {trashed.length === 0 && <div className="menu-empty">Trash is empty</div>}
-      {trashed.map((p) => (
-        <div key={p.id} className="trash-row">
-          <span>{p.format.icon ?? '📄'} {pageTitle(p)}</span>
-          <span style={{ flex: 1 }} />
-          <button className="btn small" onClick={() => restorePage(p.id)}>Restore</button>
-          <button className="btn small danger" onClick={() => purgePage(p.id)}>Delete forever</button>
-        </div>
-      ))}
-    </Modal>
+    <div ref={ref} className="popover trash-pop" style={{ left: side && side.width > 0 ? side.right + 4 : 12 }}>
+      <div className="trash-search">
+        <Icon name="search" size={16} />
+        <input autoFocus placeholder="Search pages in Trash" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="trash-list">
+        {trashed.length === 0 && <div className="trash-empty">{query ? 'No matches found.' : 'No pages in Trash'}</div>}
+        {trashed.map((p) => {
+          const where = pagePath(blocks, p.parent_id ?? '').map(pageTitle).join(' / ')
+          return (
+            <div key={p.id} className="trash-row" onMouseLeave={() => confirm === p.id && setConfirm(null)}>
+              <span className="trash-icon">{p.format.icon ?? <Icon name="page" size={18} />}</span>
+              <span className="trash-text" onClick={() => { openPage(p.id); onClose() }}>
+                <span className="trash-title">{pageTitle(p)}</span>
+                {where && <span className="trash-where">{where}</span>}
+              </span>
+              {confirm === p.id ? (
+                <button className="btn small danger" onClick={() => { purgePage(p.id); setConfirm(null) }}>Delete forever</button>
+              ) : (
+                <>
+                  <button className="ctl trash-btn" title="Restore" onClick={() => restorePage(p.id)}>
+                    <Icon name="history" size={16} />
+                  </button>
+                  <button className="ctl trash-btn" title="Delete from Trash" onClick={() => setConfirm(p.id)}>
+                    <Icon name="trash" size={16} />
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }

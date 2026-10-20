@@ -180,7 +180,6 @@ export default function App() {
             ))}
           </div>
           <span style={{ flex: 1 }} />
-          {page && !page.alive && <span className="trash-banner">This page is in the trash</span>}
           {page?.format.locked && (
             <button className="lock-pill" title={'Locked to prevent accidental editing.\nClick to unlock'} onClick={() => useStore.getState().updateBlock(page.id, { format: { locked: undefined } })}>
               <Icon name="lock" size={14} /> Locked

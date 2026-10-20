@@ -966,7 +966,8 @@ function TimelineBody({ db, rows, view, newRow }: BodyProps) {
   const days = Array.from({ length: span }, (_, i) => addDays(first, i))
   const months: { label: string; from: number; n: number }[] = []
   days.forEach((d, i) => {
-    const label = toDate(d).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    // Year zoom: the top row shows years and the second row months.
+    const label = toDate(d).toLocaleDateString('en-US', zoom === 'year' ? { year: 'numeric' } : { month: 'long', year: 'numeric' })
     if (months.at(-1)?.label === label) months.at(-1)!.n++
     else months.push({ label, from: i, n: 1 })
   })

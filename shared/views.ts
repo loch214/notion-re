@@ -239,6 +239,8 @@ export function describeView(db: Block, view: DbView): string {
   if (view.wrap?.length) parts.push(`wrapped columns: ${view.wrap.map(name).join(', ')}`)
   if (view.calendar_by) parts.push(`by date ${name(view.calendar_by)}`)
   if (view.timeline_by) parts.push(`timeline by ${name(view.timeline_by)}`)
+  if (view.type === 'timeline') parts.push(`zoom ${view.timeline_zoom ?? 'month'}${view.timeline_table === false ? ', table hidden' : ''}`)
+  if (view.type === 'calendar') parts.push(`shown as ${view.calendar_range ?? 'month'}`)
   if (view.filter.filters.length) parts.push(`filter: ${view.filter.filters.map(label).join(view.filter.operator === 'or' ? ' OR ' : ' AND ')}`)
   if (view.sort.length) parts.push(`sort: ${view.sort.map((s) => `${name(s.property)} ${s.direction}`).join(', ')}`)
   if (view.hidden?.length) parts.push(`hidden: ${view.hidden.map(name).join(', ')}`)

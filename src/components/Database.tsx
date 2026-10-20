@@ -5,7 +5,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DateCell } from './DatePicker'
 import { openRow } from './Peek'
-import { PlusIcon, TriangleIcon } from './Icons'
+import { DragIcon, Icon, PlusIcon, TriangleIcon } from './Icons'
+import { ActionMenu } from './Menu'
+import { pageUrl } from '../router'
 import { askNotificationPermission } from '../reminders'
 import { cellRaw, dbRows, isSingleChoice, OPTION_COLORS, PROPERTY_TYPES, shortId, statusOptions } from '../../shared/blocks.ts'
 import { isDateValue } from '../../shared/dates.ts'
@@ -89,7 +91,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
       <div className="db-scroll">
         <table className="db-table">
           <colgroup>
-            <col style={{ width: 28 }} />
+            <col style={{ width: 44 }} />
             {schema.map((p) => (
               <col key={p.id} style={{ width: defaultWidth(p) }} />
             ))}
@@ -154,18 +156,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
                 }}
               >
                 <td className="db-gutter">
-                  <span
-                    className="ctl db-row-drag"
-                    draggable
-                    title="Drag to reorder"
-                    onDragStart={(e) => e.dataTransfer.setData('application/x-row', row.id)}
-                    onDragEnd={() => setDropRow(null)}
-                  >
-                    ⋮⋮
-                  </span>
-                  <button className="ctl db-row-del" title="Delete row" onClick={() => S().removeBlock(row.id)}>
-                    🗑
-                  </button>
+                  <RowHandle rowId={row.id} view={view} onDragEnd={() => setDropRow(null)} />
                 </td>
                 {schema.map((p) => (
                   <td key={p.id} className={`db-td db-td-${p.type}`}>
@@ -693,5 +684,53 @@ export function RowProperties({ rowId }: { rowId: string }) {
       </button>
       {menu && db.schema.some((p) => p.id === menu.propId) && <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />}
     </div>
+  )
+}
+
+/** Notion's row handles: "+" adds a row below, "⋮⋮" drags to reorder or (click) opens the row menu. */
+export function RowHandle({ rowId, view, onDragEnd }: { rowId: string; view?: DbView; onDragEnd?: () => void }) {
+  const [menu, setMenu] = useState<DOMRect | null>(null)
+  const S = useStore.getState
+  const addBelow = () => {
+    const row = S().blocks[rowId]
+    if (!row?.parent_id) return
+    let id = ''
+    S().transact(() => {
+      id = S().newDbRow(row.parent_id!)
+      S().moveBlock(id, rowId, 'after')
+    })
+    openRow(id, view)
+  }
+  return (
+    <span className="db-row-handles">
+      <button className="ctl db-row-add" title="Click to add below" onClick={addBelow}>
+        <PlusIcon size={14} />
+      </button>
+      <span
+        className="ctl db-row-drag"
+        draggable
+        title="Drag to move · Click to open menu"
+        onDragStart={(e) => e.dataTransfer.setData('application/x-row', rowId)}
+        onDragEnd={onDragEnd}
+        onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}
+      >
+        <DragIcon size={14} />
+      </span>
+      {menu && (
+        <ActionMenu
+          style={{ left: menu.right + 4, top: Math.min(menu.top, innerHeight - 260) }}
+          onClose={() => setMenu(null)}
+          search={false}
+          entries={[
+            { label: 'Open in side peek', icon: 'peek', onClick: () => openRow(rowId) },
+            { label: 'Open as full page', icon: 'openFull', onClick: () => S().openPage(rowId) },
+            { kind: 'sep' },
+            { label: 'Copy link', icon: 'link', onClick: () => navigator.clipboard.writeText(pageUrl(rowId)).then(() => S().showToast({ label: 'Copied link to clipboard' })) },
+            { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().duplicate(rowId) },
+            { label: 'Delete', icon: 'trash', kbd: 'Del', danger: true, onClick: () => S().removeBlock(rowId) },
+          ]}
+        />
+      )}
+    </span>
   )
 }

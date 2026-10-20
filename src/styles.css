@@ -298,8 +298,8 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 
 /* ---- databases ---- */
 .page-inner.is-db { max-width: 1100px; }
-.db { margin: 8px 0 0 -28px; }
-.db-views { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-left: 28px; padding-bottom: 4px; }
+.db { --db-gutter: 44px; margin: 8px 0 0 calc(-1 * var(--db-gutter)); }
+.db-views { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-left: var(--db-gutter); padding-bottom: 4px; }
 .db-view-tab { font-size: 14px; padding: 4px 8px; border-radius: 4px; color: var(--muted); }
 .db-view-tab.active { color: var(--text); font-weight: 500; }
 .db-scroll { overflow-x: auto; }
@@ -336,7 +336,7 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .db-select { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 8px; min-height: 34px; cursor: pointer; }
 .db-empty { color: transparent; font-size: 14px; }
 .row-props .db-empty { color: var(--faint); }
-.db-new-row { display: block; width: calc(100% - 28px); margin-left: 28px; text-align: left; padding: 7px 8px; color: var(--muted); font-size: 14px; border-bottom: 1px solid var(--border); }
+.db-new-row { display: block; width: calc(100% - var(--db-gutter)); margin-left: var(--db-gutter); text-align: left; padding: 7px 8px; color: var(--muted); font-size: 14px; border-bottom: 1px solid var(--border); }
 .db-new-row:hover { background: var(--bg-hover); }
 
 .db-popover { max-height: 420px; overflow-y: auto; }
@@ -548,7 +548,7 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .db-rule > select, .db-rule > input { flex: 1; }
 .db-rule-join { width: 58px; flex-shrink: 0; font-size: 13px; color: var(--muted); }
 .db-rule-join select { width: 100%; }
-.db-empty-view { margin-left: 28px; padding: 24px 8px; color: var(--muted); font-size: 14px; }
+.db-empty-view { margin-left: var(--db-gutter); padding: 24px 8px; color: var(--muted); font-size: 14px; }
 
 .db-card { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--bg); box-shadow: 0 0 0 1px var(--border), 0 2px 4px rgba(15, 15, 15, 0.06); cursor: pointer; font-size: 14px; overflow: hidden; }
 .db-card:hover { background: var(--bg-hover); }
@@ -556,20 +556,20 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .db-card-prop { display: flex; flex-wrap: wrap; gap: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drop-on { outline: 2px solid rgba(35, 131, 226, 0.5); outline-offset: -2px; }
 
-.db-board { display: flex; gap: 12px; overflow-x: auto; margin-left: 28px; padding: 8px 0 16px; align-items: flex-start; }
+.db-board { display: flex; gap: 12px; overflow-x: auto; margin-left: var(--db-gutter); padding: 8px 0 16px; align-items: flex-start; }
 .db-board-col { width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; padding: 6px; border-radius: 8px; background: var(--bg-hover); }
 .db-board-head { display: flex; align-items: center; gap: 8px; padding: 2px 4px; font-size: 14px; }
 .db-card-new { text-align: left; padding: 6px 8px; border-radius: 6px; color: var(--muted); font-size: 14px; }
 .db-card-new:hover { background: var(--bg-active); }
 
-.db-list { margin-left: 28px; }
+.db-list { margin-left: var(--db-gutter); }
 .db-list-row { display: flex; align-items: center; gap: 8px; padding: 0 6px; min-height: 34px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .db-list-row:hover { background: var(--bg-hover); }
 .db-list-row .db-card-prop { flex: 0 1 auto; max-width: 30%; }
 .db-list-title { font-weight: 500; }
 .db-list .db-new-row { width: 100%; margin-left: 0; border-bottom: 0; border-radius: 6px; padding: 7px 6px; }
 
-.db-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-left: 28px; padding: 8px 0 16px; }
+.db-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-left: var(--db-gutter); padding: 8px 0 16px; }
 .db-gallery .db-card { padding: 0 0 10px; }
 .db-gallery .db-card > :not(.db-gallery-cover):not(.db-gallery-preview) { padding: 0 10px; }
 .db-gallery-cover { height: 120px; }
@@ -577,7 +577,7 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .db-gallery-new { border: 1px dashed var(--border); border-radius: 6px; color: var(--muted); min-height: 80px; }
 .db-gallery-new:hover { background: var(--bg-hover); }
 
-.db-calendar { margin-left: 28px; padding: 8px 0 16px; }
+.db-calendar { margin-left: var(--db-gutter); padding: 8px 0 16px; }
 .db-cal-head { display: flex; align-items: center; gap: 4px; padding: 4px 0 8px; font-size: 14px; }
 .db-cal-head b { font-weight: 600; }
 .db-cal-mode { display: inline-flex; margin-right: 6px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; }
@@ -999,7 +999,7 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .template-banner > button:not(.btn) { color: var(--text); font-weight: 500; text-decoration: underline; text-decoration-color: var(--link-line); }
 
 /* ── Timeline view ── */
-.db-timeline { margin-left: 28px; padding: 8px 0 16px; font-size: 14px; }
+.db-timeline { margin-left: var(--db-gutter); padding: 8px 0 16px; font-size: 14px; }
 .db-tl-head { display: flex; align-items: center; gap: 4px; padding: 0 0 8px; }
 .db-tl-body { display: flex; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
 .db-tl-names { width: 220px; flex: none; border-right: 1px solid var(--divider); }
@@ -1397,3 +1397,14 @@ td.library-src svg { vertical-align: -2px; color: var(--muted); }
 .ai-block-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
 .ai-chip-x { margin-left: 2px; color: var(--muted); font-size: 14px; line-height: 1; }
 .ai-chip-x:hover { color: var(--text); }
+
+/* Row handles ("+" and ⋮⋮) like Notion's, shown on hover left of the row. */
+.db-row-handles { display: inline-flex; align-items: center; gap: 0; opacity: 0; transition: opacity .1s; }
+tr:hover .db-row-handles, .db-list-row:hover .db-row-handles { opacity: 1; }
+.db-row-add, .db-row-drag { width: 20px; height: 24px; border-radius: 4px; color: var(--faint); display: inline-grid; place-items: center; cursor: pointer; }
+.db-row-drag { cursor: grab; }
+.db-row-add:hover, .db-row-drag:hover { background: var(--bg-hover); color: var(--muted); }
+.db-list-row { position: relative; }
+.db-list-handles { position: absolute; left: -44px; top: 50%; transform: translateY(-50%); }
+.db-row-handles .db-row-drag { opacity: 1; letter-spacing: 0; font-size: inherit; }
+.db-gutter { text-align: right; padding: 0 2px 0 0; }

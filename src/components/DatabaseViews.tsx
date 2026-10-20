@@ -10,7 +10,7 @@ import { cellRaw, coverCss, dbTemplates, htmlToPlain, isSingleChoice, shortId, s
 import { applyView, boardGroups, getViews, needsValue, newView, OPERATORS, prefillFor, VIEW_TYPES } from '../../shared/views.ts'
 import { pageTitle, useStore } from '../store'
 import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator } from '../types'
-import { Cell, Pill, Popover, PropertyMenu, TableBody, TYPE_ICON } from './Database'
+import { Cell, Pill, Popover, PropertyMenu, RowHandle, TableBody, TYPE_ICON } from './Database'
 import { copyPageLink } from './PageMenu'
 
 const S = useStore.getState
@@ -653,7 +653,8 @@ function ListBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className="db-list">
       {rows.map((r) => (
-        <div key={r.id} className="db-list-row" data-row-id={r.id} onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
+        <div key={r.id} className="db-list-row" data-row-id={r.id} onClick={(e) => !(e.target as HTMLElement).closest('.db-row-handles, .popover, .backdrop') && openRow(r.id, view, rows.map((x) => x.id))}>
+          <span className="db-list-handles" onClick={(e) => e.stopPropagation()}><RowHandle rowId={r.id} view={view} /></span>
           {r.format.icon && <span className="db-row-icon">{r.format.icon}</span>}
           <span className="db-list-title">{pageTitle(r)}</span>
           <span className="db-list-props">

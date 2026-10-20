@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { markdownToBlocks } from '../markdown'
 import { HOME_ID, pageTitle, useStore } from '../store'
 import { Icon, PlusIcon, TriangleIcon } from './Icons'
 import { Avatar, initials, useProfile } from '../profile'
 import { addDays, formatDay, todayIso } from '../../shared/dates'
 import { upcoming } from '../../shared/home'
-import { ActionMenu } from './Menu'
+import { ActionMenu, EditedFooter } from './Menu'
+import { copyPageLink, MovePageModal, toggleFavorite } from './PageMenu'
+import { openRow } from './Peek'
+import { getProfileName } from '../profile'
 import { useUnreadCount } from './Inbox'
 
 interface Props {
@@ -333,6 +337,10 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
   const current = useStore((s) => s.currentPageId)
   const [open, setOpen] = useState(false)
   const [drop, setDrop] = useState<'before' | 'after' | 'inside' | null>(null)
+  // Notion's "⋯" on a sidebar page: favourite, copy link, duplicate, rename, move, peek, trash.
+  const [menu, setMenu] = useState<DOMRect | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [moving, setMoving] = useState(false)
   const S = useStore.getState
 
   // A database's child pages are its rows; like Notion, they don't appear in the tree.
@@ -365,7 +373,7 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
           }
           setDrop(null)
         }}
-        onClick={() => S().openPage(id)}
+        onClick={(e) => (e.altKey ? openRow(id) : S().openPage(id))}
       >
         {/* Like Notion: the page icon turns into the expand arrow while you hover the row. */}
         <button
@@ -381,17 +389,35 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
             <TriangleIcon />
           </span>
         </button>
-        <span className="tree-title">{pageTitle(page)}</span>
-        <span className="tree-actions">
+        {renaming ? (
+          <input
+            className="tree-rename"
+            autoFocus
+            defaultValue={page.properties.title}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={(e) => {
+              S().updateBlock(id, { properties: { title: e.currentTarget.value } })
+              setRenaming(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+              if (e.key === 'Escape') setRenaming(false)
+            }}
+          />
+        ) : (
+          <span className="tree-title">{pageTitle(page)}</span>
+        )}
+        <span className={`tree-actions ${menu ? 'on' : ''}`}>
           <button
             className="ctl"
-            title="Delete"
+            title="Delete, duplicate, and more…"
             onClick={(e) => {
               e.stopPropagation()
-              S().removeBlock(id)
+              const r = e.currentTarget.getBoundingClientRect()
+              setMenu(r.width ? r : e.currentTarget.closest('.tree-item')!.getBoundingClientRect())
             }}
           >
-            <Icon name="trash" size={15} />
+            <Icon name="more" size={15} />
           </button>
           <button
             className="ctl"
@@ -406,6 +432,28 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
           </button>
         </span>
       </div>
+      {menu && createPortal(
+        <ActionMenu
+          className="tree-menu"
+          style={{ left: menu.left, top: Math.min(menu.bottom + 4, innerHeight - 340) }}
+          onClose={() => setMenu(null)}
+          search={false}
+          entries={[
+            { label: page.format.favorite ? 'Remove from Favorites' : 'Add to Favorites', icon: 'star', onClick: () => toggleFavorite(id) },
+            { kind: 'sep' },
+            { label: 'Copy link', icon: 'link', onClick: () => copyPageLink(id) },
+            { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().duplicate(id) },
+            { label: 'Rename', icon: 'pencil', kbd: 'Ctrl+Shift+R', onClick: () => setRenaming(true) },
+            { label: 'Move to', icon: 'moveTo', kbd: 'Ctrl+Shift+P', onClick: () => setMoving(true) },
+            { label: 'Move to Trash', icon: 'trash', danger: true, onClick: () => S().removeBlock(id) },
+            { kind: 'sep' },
+            { label: 'Open in side peek', icon: 'peek', kbd: 'Alt+Click', onClick: () => openRow(id) },
+          ]}
+          footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} />}
+        />,
+        document.body,
+      )}
+      {moving && createPortal(<MovePageModal pageId={id} onClose={() => setMoving(false)} />, document.body)}
       {open &&
         (childPages.length ? (
           childPages.map((c) => <TreeItem key={c} id={c} depth={depth + 1} />)

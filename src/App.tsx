@@ -9,7 +9,7 @@ import { copyPageLink, MovePageModal, PageMenu, toggleFavorite } from './compone
 import { PageView } from './components/PageView'
 import { Sidebar } from './components/Sidebar'
 import { FindBar } from './components/Find'
-import { Icon } from './components/Icons'
+import { Icon, type IconName } from './components/Icons'
 import { FormatToolbar } from './components/FormatToolbar'
 import { HOME_ID, LIBRARY_ID, pagePath, pageTitle, useStore } from './store'
 import { Library } from './components/Library'
@@ -300,8 +300,11 @@ function Toast() {
     return () => clearTimeout(t)
   }, [toast])
   if (!toast) return null
+  // A small icon that matches the message, like Notion's toasts.
+  const icon: IconName = /copied|link/i.test(toast.label) ? 'link' : /trash|deleted/i.test(toast.label) ? 'trash' : /restor|undo/i.test(toast.label) ? 'history' : 'check'
   return (
-    <div className="toast" role="status">
+    <div className="toast" role="status" key={toast.label}>
+      <Icon name={icon} size={16} className="toast-icon" />
       <span>{toast.label}</span>
       {toast.action && (
         <button

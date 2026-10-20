@@ -471,7 +471,7 @@ function TreeItem({ id, depth }: { id: string; depth: number }) {
             { kind: 'sep' },
             { label: 'Open in side peek', icon: 'peek', kbd: 'Alt+Click', onClick: () => openRow(id) },
           ]}
-          footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} />}
+          footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} created={page.created_time} />}
         />,
         document.body,
       )}

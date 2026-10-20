@@ -112,6 +112,14 @@ const NUMBER_FORMATS = ['numbers', 'letters', 'roman'] as const
 const BULLETS: Record<string, string> = { disc: '•', circle: '◦', square: '▪' }
 const BULLET_FORMATS = ['disc', 'circle', 'square'] as const
 
+/** "12 words, 64 characters" for the block menu footer (Notion shows the same). */
+function countLabel(block: Block) {
+  const text = htmlToText(block.properties.title ?? '').trim()
+  if (!text) return undefined
+  const words = text.split(/\s+/).filter(Boolean).length
+  return `${words} word${words === 1 ? '' : 's'}, ${text.length} character${text.length === 1 ? '' : 's'}`
+}
+
 export function listMarker(block: Block, number: number, depth: number): string {
   if (block.type === 'bulleted_list') return BULLETS[block.format.list_format ?? BULLET_FORMATS[depth % 3]] ?? '•'
   const f = block.format.list_format ?? NUMBER_FORMATS[depth % 3]
@@ -1081,7 +1089,7 @@ function BlockMenu({ id, pageId, anchor, onClose, onAskAI }: { id: string; pageI
       style={{ left: Math.min(anchor.left, innerWidth - 280), top: Math.max(8, top) }}
       entries={entries}
       onClose={onClose}
-      footer={<EditedFooter name={getProfileName()} time={block.last_edited_time} />}
+      footer={<EditedFooter name={getProfileName()} time={block.last_edited_time} extra={countLabel(block)} />}
     />
   )
 }

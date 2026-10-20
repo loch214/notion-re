@@ -4,6 +4,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Icon, type IconName } from './Icons'
+import { Avatar } from '../profile'
 
 export type MenuEntry =
   | {
@@ -190,14 +191,32 @@ export function ActionMenu({
   )
 }
 
-/** "Last edited" footer with the editor's name and time (Notion shows it under page and block menus). */
-export function EditedFooter({ name, time, extra }: { name: string; time: number; extra?: string }) {
+const shortDay = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+/**
+ * "Last edited" footer with the editor's avatar, name and time (Notion shows it under page and block menus).
+ * With `created`, hovering it opens Notion's "Activity" card beside the menu (edited by / created by).
+ */
+export function EditedFooter({ name, time, extra, created }: { name: string; time: number; extra?: string; created?: number }) {
+  const [card, setCard] = useState<DOMRect | null>(null)
+  const who = name || 'You'
   return (
-    <>
+    <div
+      className="amenu-edited"
+      onMouseEnter={(e) => created && setCard((e.currentTarget.closest('.amenu') ?? e.currentTarget).getBoundingClientRect())}
+      onMouseLeave={() => setCard(null)}
+    >
       <div>Last edited</div>
-      <div className="amenu-footer-name">{name || 'You'}</div>
+      <div className="amenu-footer-name"><Avatar className="tiny" /> {who}</div>
       <div>{new Date(time).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
       {extra && <div>{extra}</div>}
-    </>
+      {card && created && (
+        <div className="popover amenu-activity" style={{ left: card.right + 6 + 260 > innerWidth ? card.left - 266 : card.right + 6, top: Math.min(card.bottom - 110, innerHeight - 120) }}>
+          <div className="amenu-section">Activity</div>
+          <div className="amenu-activity-row"><Avatar className="tiny" /> <span>Edited by <b>{who}</b></span><span className="amenu-activity-date">{shortDay(time)}</span></div>
+          <div className="amenu-activity-row"><Avatar className="tiny" /> <span>Created by <b>{who}</b></span><span className="amenu-activity-date">{shortDay(created)}</span></div>
+        </div>
+      )}
+    </div>
   )
 }

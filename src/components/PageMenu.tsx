@@ -150,7 +150,7 @@ export function PageMenu({ pageId, onClose, onHistory, onMove }: { pageId: strin
       className="page-menu"
       entries={entries}
       onClose={onClose}
-      footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} extra={`${words.toLocaleString()} word${words === 1 ? '' : 's'}`} />}
+      footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} created={page.created_time} extra={`${words.toLocaleString()} word${words === 1 ? '' : 's'}`} />}
     />
   )
 }

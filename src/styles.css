@@ -1237,3 +1237,12 @@ img.avatar { object-fit: cover; padding: 0; }
 .trash-text { cursor: pointer; }
 .peek-sep { width: 1px; height: 16px; background: var(--border); margin: 0 6px; }
 .peek-head .ctl:disabled { opacity: .35; cursor: default; background: none; }
+.picker-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--border); margin: -4px -4px 6px; }
+.picker-tab { position: relative; padding: 6px 8px 8px; font-size: 14px; color: var(--muted); border-radius: 6px 6px 0 0; }
+.picker-tab:hover { color: var(--text); }
+.picker-tab.on { color: var(--text); font-weight: 500; }
+.picker-tab.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; background: var(--text); }
+.cover-scroll { max-height: 300px; overflow-y: auto; }
+.picker-top.cover-link { padding: 8px 4px; }
+.cover-scroll .cover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.cover-scroll .cover-swatch { width: auto; height: 64px; }

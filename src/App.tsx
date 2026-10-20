@@ -1,5 +1,6 @@
+import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { AIPanel } from './components/AIPanel'
+import { AIPanel, getAIMode, setAIMode, type AIMode } from './components/AIPanel'
 import { ASK_AI_EVENT, askAI } from './askAI'
 import type { SettingsTab } from './components/Modals'
 import { SearchModal, SettingsModal, ShortcutsModal, TrashModal } from './components/Modals'
@@ -36,6 +37,21 @@ export default function App() {
   const blocks = useStore((s) => s.blocks)
   const [modal, setModal] = useState<ModalKind>(null)
   const [aiOpen, setAiOpen] = useState(false)
+  // The panel stays mounted after the first open so it can slide out (and keeps a running chat alive).
+  const [aiMounted, setAiMounted] = useState(false)
+  const [aiMode, setAiModeState] = useState<AIMode>(getAIMode)
+  // Sidebar "New chat" opens the chat full screen, like Notion's chat page, without changing the saved mode.
+  const [aiFull, setAiFull] = useState(false)
+  const [sideRight, setSideRight] = useState(0)
+  // "open" is applied a frame after mounting so the first open slides in too.
+  const [aiShown, setAiShown] = useState(false)
+  useEffect(() => {
+    if (aiOpen) setAiMounted(true)
+    else setAiFull(false)
+    if (!aiOpen) return setAiShown(false)
+    let id = requestAnimationFrame(() => (id = requestAnimationFrame(() => setAiShown(true))))
+    return () => cancelAnimationFrame(id)
+  }, [aiOpen])
   useEffect(() => {
     const open = () => setAiOpen(true)
     window.addEventListener(ASK_AI_EVENT, open)
@@ -55,6 +71,14 @@ export default function App() {
   useEffect(() => {
     useStore.getState().load()
   }, [])
+
+  useEffect(() => {
+    const side = document.querySelector('.sidebar')
+    if (!side) return setSideRight(0)
+    const ro = new ResizeObserver(() => setSideRight(side.getBoundingClientRect().right))
+    ro.observe(side)
+    return () => ro.disconnect()
+  }, [sidebarOpen, loaded])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -144,7 +168,10 @@ export default function App() {
           }}
           onTrash={() => setModal('trash')}
           onTemplates={() => setModal('templates')}
-          onAI={() => askAI('', true)}
+          onAI={() => {
+            setAiFull(true)
+            askAI('', true)
+          }}
           onShortcuts={() => setModal('shortcuts')}
           onInbox={() => (inboxLeft === null ? openInbox() : setInboxLeft(null))}
           onCollapse={() => setSidebarOpen(false)}
@@ -225,7 +252,20 @@ export default function App() {
       <PeekPanel />
       {findOpen && <FindBar onClose={() => setFindOpen(false)} />}
       {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
-      {aiOpen && <AIPanel onClose={() => setAiOpen(false)} onSettings={() => setModal('settings')} />}
+      {aiMounted && (
+        <div className={`ai-dock ${aiFull ? 'full' : aiMode} ${aiShown ? 'open' : ''}`} style={{ '--ai-full-left': `${sideRight}px` } as React.CSSProperties}>
+          <AIPanel
+            mode={aiFull ? 'full' : aiMode}
+            onMode={(m) => {
+              setAiFull(false)
+              setAIMode(m)
+              setAiModeState(m)
+            }}
+            onClose={() => setAiOpen(false)}
+            onSettings={() => setModal('settings')}
+          />
+        </div>
+      )}
 
       {pageMenuOpen && page && <PageMenu pageId={page.id} onClose={() => setPageMenuOpen(false)} onHistory={() => setHistoryOpen(true)} onMove={() => setMoveOpen(true)} />}
       {moveOpen && page && <MovePageModal pageId={page.id} onClose={() => setMoveOpen(false)} />}

@@ -27,6 +27,8 @@
   --code-bg: #f7f6f3;
   --callout-bg: #f0efed;
   --popover: #ffffff;
+  --shadow-float: rgba(15, 15, 15, .1) 0 0 0 1px, rgba(15, 15, 15, .1) 0 14px 28px -6px, rgba(15, 15, 15, .06) 0 2px 4px -1px;
+  --shadow-peek: rgba(15, 15, 15, .1) 0 0 0 1px, rgba(15, 15, 15, .08) 0 4px 12px -2px;
   --scroll-thumb: #d3d1cb;
   --scroll-thumb-hover: #aeaca6;
   --backdrop: rgba(15, 15, 15, 0.6);
@@ -56,6 +58,8 @@
   --code-bg: rgba(255, 255, 255, 0.03);
   --callout-bg: #383836;
   --popover: #252525;
+  --shadow-float: rgb(56, 56, 54) 0 0 0 1px, rgba(25, 25, 25, .2) 0 14px 28px -6px, rgba(25, 25, 25, .118) 0 2px 4px -1px;
+  --shadow-peek: rgb(56, 56, 54) 0 0 0 1px, rgba(25, 25, 25, .08) 0 4px 12px -2px;
   --scroll-thumb: #474c50;
   --scroll-thumb-hover: #5e6366;
   --backdrop: rgba(15, 15, 15, 0.8);
@@ -1273,3 +1277,50 @@ img.avatar { object-fit: cover; padding: 0; }
 .toast { animation: nre-backdrop-in 160ms ease-out; }
 html { scroll-behavior: smooth; }
 @media (prefers-reduced-motion: reduce) { .popover, .modal, .modal-backdrop, .toast, .peek { animation: none; } html { scroll-behavior: auto; } }
+
+/* ---- AI chat modes (values measured on Notion, analysis/ui-audit.md §1) ---- */
+.ai-dock { position: relative; flex-shrink: 0; width: 0; transition: width .2s ease; }
+.ai-dock.sidebar.open { width: 360px; }
+.ai-dock .ai-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 360px; border-left: 0; z-index: 30;
+  transform: translateX(100%); visibility: hidden; transition: transform .2s ease, visibility 0s .2s; }
+.ai-dock.open .ai-panel { transform: none; visibility: visible; transition: transform .2s ease, visibility 0s; }
+/* Floating: a card in the corner that scales up from the bottom-right; the page doesn't move. */
+.ai-dock.floating .ai-panel { position: fixed; top: auto; right: 15px; bottom: 15px; width: 450px; height: min(500px, calc(100vh - 30px));
+  border-radius: 22px 22px 32px 32px; box-shadow: var(--shadow-float); overflow: hidden; z-index: 46;
+  transform: scale(.96); transform-origin: 100% 100%; opacity: 0;
+  transition: opacity .1s ease, transform .1s ease, visibility 0s .1s; }
+.ai-dock.floating.open .ai-panel { transform: none; opacity: 1; transition: opacity .2s ease, transform .2s ease, visibility 0s; }
+/* Full screen: fills the page area; chat column centred like Notion's chat page. */
+.ai-dock.full .ai-panel { position: fixed; top: 0; bottom: 0; right: 0; left: var(--ai-full-left, 0); width: auto; z-index: 40;
+  transform: none; opacity: 0; transition: opacity .15s ease, visibility 0s .15s; }
+.ai-dock.full.open .ai-panel { opacity: 1; transition: opacity .15s ease, visibility 0s; }
+.ai-panel.full .ai-messages, .ai-panel.full .ai-compose { width: min(720px, calc(100% - 48px)); margin-left: auto; margin-right: auto; }
+.ai-panel.full .ai-messages { padding-left: 0; padding-right: 0; }
+.ai-panel.full .ai-welcome { align-items: center; justify-content: center; text-align: center; }
+.ai-panel.full .ai-welcome h2 { font-size: 26px; margin: 18px 0 24px; }
+.ai-panel.full .ai-suggestion { width: auto; margin-left: 0; }
+.ai-panel.full .ai-compose { margin-bottom: 24px; }
+/* Header: 28 px icon buttons like Notion's. */
+.ai-panel-head { height: 44px; padding: 0 10px 0 12px; gap: 4px; }
+.ai-panel-head .ai-avatar.small { width: 28px; height: 28px; margin-right: 2px; }
+.ai-head-btn { width: 28px; height: 28px; border-radius: 6px; color: var(--icon, var(--muted)); }
+.ai-head-btn:hover, .ai-head-btn.on, .ai-bar-btn:hover, .ai-bar-btn.on { background: var(--bg-hover); color: var(--text); }
+.ai-panel.floating .ai-panel-head { padding: 6px 12px 0 14px; }
+/* Composer bottom row. */
+.ai-bar-btn { width: 28px; height: 28px; border-radius: 50%; color: var(--muted); }
+.ai-compose { border-radius: 16px; }
+.ai-small-menu .amenu-item kbd { color: var(--text); }
+.ai-approval-head { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); }
+.ai-approval-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 6px 10px; border-radius: 6px; text-align: left; }
+.ai-approval-row:hover { background: var(--bg-hover); }
+.ai-approval-row > span { display: flex; flex-direction: column; gap: 1px; }
+.ai-approval-label { font-size: 14px; color: var(--text); }
+.ai-approval-label.warn { color: #d9730d; }
+.ai-approval-hint { font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .ai-dock, .ai-dock .ai-panel { transition: none !important; } }
+.ai-panel.full.empty .ai-messages { flex: none; margin-top: auto; overflow: visible; }
+.ai-panel.full.empty .ai-welcome { min-height: 0; padding: 0; }
+.ai-panel.full.empty .ai-compose { margin-bottom: 12px; }
+.ai-full-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0 auto auto; width: min(720px, calc(100% - 48px)); }
+.ai-full-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 14px; color: var(--muted); }
+.ai-full-chip:hover { background: var(--bg-hover); color: var(--text); }

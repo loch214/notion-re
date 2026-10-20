@@ -1,11 +1,12 @@
+import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { activeModel, answerPermission, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage, type PermissionRequest } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
 import { ASK_AI_EVENT, takePendingPrompt } from '../askAI'
 import { hasNamedStep, isServerMode, pageTitle, useStore } from '../store'
-import { Icon, type IconName } from './Icons'
+import { Icon, PlusIcon, type IconName } from './Icons'
 import { Markdown } from './Markdown'
-import { ActionMenu } from './Menu'
+import { ActionMenu, type MenuEntry } from './Menu'
 
 const QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'List the action items']]
 const AGENT_QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'Create a task tracker']]
@@ -56,7 +57,18 @@ async function uploadAttachment(file: File): Promise<string> {
   return (await r.json()).url
 }
 
-export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettings: () => void }) {
+/** Notion's chat modes: docked on the right, a floating card, or full screen. */
+export type AIMode = 'sidebar' | 'floating' | 'full'
+const AI_MODE_KEY = 'notion-re:ai-mode'
+export const getAIMode = (): AIMode => (localStorage.getItem(AI_MODE_KEY) === 'floating' ? 'floating' : 'sidebar')
+export const setAIMode = (m: AIMode) => m !== 'full' && localStorage.setItem(AI_MODE_KEY, m)
+const MODES: [AIMode, string, IconName][] = [
+  ['sidebar', 'Sidebar', 'modeSidebar'],
+  ['floating', 'Floating', 'modeFloating'],
+  ['full', 'Full screen', 'modeFull'],
+]
+
+export function AIPanel({ mode, onMode, onClose, onSettings }: { mode: AIMode; onMode: (m: AIMode) => void; onClose: () => void; onSettings: () => void }) {
   const settings = useStore((s) => s.settings)
   const pageId = useStore((s) => s.currentPageId)
   const page = useStore((s) => (pageId ? s.blocks[pageId] : undefined))
@@ -70,6 +82,8 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   const [dragging, setDragging] = useState(false)
   const [picker, setPicker] = useState<{ fromAt: boolean } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [menu, setMenu] = useState<{ kind: 'mode' | 'plus' | 'approval'; rect: DOMRect } | null>(null)
+  const openMenu = (kind: 'mode' | 'plus' | 'approval') => (e: React.MouseEvent) => setMenu(menu?.kind === kind ? null : { kind, rect: e.currentTarget.getBoundingClientRect() })
   const [chatId, setChatId] = useState(() => localStorage.getItem(OPEN_CHAT_KEY) ?? newId())
   const abort = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
@@ -268,7 +282,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   const canAttach = agent && canSave
   return (
     <aside
-      className={`ai-panel ${dragging ? 'dragging' : ''}`}
+      className={`ai-panel ${mode} ${messages.length ? "" : "empty"} ${dragging ? "dragging" : ""}`}
       onDragOver={(e) => {
         if (!canAttach || !e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
@@ -283,17 +297,33 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
       }}
     >
       <div className="ai-panel-head">
-        <button className="ai-title-btn" title="Past chats" onClick={() => canSave && setHistoryOpen(!historyOpen)}>
+        <span className="ai-avatar small"><Icon name="sparkle" size={15} /></span>
+        <button className="ai-title-btn" title="Chat history" onClick={() => canSave && setHistoryOpen(!historyOpen)}>
           <span className="ai-title">{messages.length ? chatTitle(messages) : 'New AI chat'}</span>
           {canSave && <Icon name="down" size={12} />}
         </button>
         <span style={{ flex: 1 }} />
-        <button className="ctl top-ctl" title="New chat" onClick={newChat}>
-          <Icon name="compose" />
+        <button className="ctl ai-head-btn" title="Start new chat" onClick={newChat}>
+          <Icon name="chatPlus" />
         </button>
-        <button className="ctl top-ctl" onClick={onClose} title="Close (Ctrl+J)">
-          <Icon name="expand" />
+        <button className={`ctl ai-head-btn ${menu?.kind === 'mode' ? 'on' : ''}`} title="Switch chat mode" onClick={openMenu('mode')}>
+          <Icon name={MODES.find(([m]) => m === mode)![2]} />
         </button>
+        <button className="ctl ai-head-btn" onClick={onClose} title={mode === 'floating' ? 'Minimize chat (Ctrl+J)' : 'Hide chat (Ctrl+J)'}>
+          <Icon name={mode === 'floating' ? 'minus' : 'expand'} />
+        </button>
+        {menu?.kind === 'mode' && (
+          <ActionMenu
+            className="ai-small-menu"
+            search={false}
+            style={{ right: Math.max(8, innerWidth - menu.rect.right), top: menu.rect.bottom + 4, width: 200 }}
+            onClose={() => setMenu(null)}
+            entries={MODES.flatMap(([m, label, icon], k): MenuEntry[] => [
+              ...(k === 2 ? [{ kind: 'sep' } as MenuEntry] : []),
+              { label, icon, active: m === mode, kbd: m === mode ? '✓' : undefined, onClick: () => onMode(m) },
+            ])}
+          />
+        )}
         {historyOpen && <ChatHistory current={chatId} onOpen={(id) => { setHistoryOpen(false); if (id !== chatId) openChat(id) }} onDeleted={(id) => id === chatId && newChat()} onClose={() => setHistoryOpen(false)} />}
       </div>
 
@@ -309,7 +339,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
               <div className="ai-welcome">
                 <span className="ai-avatar"><Icon name="sparkle" size={30} /></span>
                 <h2>How can I help you today?</h2>
-                {(agent ? AGENT_QUICK : QUICK).map(([icon, q]) => (
+                {mode !== 'full' && (agent ? AGENT_QUICK : QUICK).map(([icon, q]) => (
                   <button key={q} className="ai-suggestion" onClick={() => send(q)}>
                     <Icon name={icon} size={18} />
                     <span>{q}</span>
@@ -362,10 +392,6 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
             }}
           >
             <div className="ai-chips">
-              <button type="button" className="ai-chip ai-add-context" title="Add pages as context (or type @)" onClick={() => setPicker(picker ? null : { fromAt: false })}>
-                @
-              </button>
-              {page && <PageChip id={page.id} current />}
               {attached.filter((id) => id !== pageId).map((id) => (
                 <PageChip key={id} id={id} onRemove={() => setAttached(attached.filter((x) => x !== id))} />
               ))}
@@ -387,7 +413,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
             <textarea
               value={input}
               rows={2}
-              placeholder={agent ? `Ask Claude, or ask it to edit ${pageTitle(page)}…` : 'Ask AI…'}
+              placeholder={agent ? 'Ask AI anything, @ to mention a page' : 'Ask AI…'}
               onChange={(e) => {
                 const v = e.target.value
                 if (v.length === input.length + 1 && /(^|\s)@$/.test(v)) setPicker({ fromAt: true })
@@ -409,24 +435,40 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
               }}
             />
             <div className="ai-compose-bar">
+              <button type="button" className={`ctl ai-bar-btn ${menu?.kind === 'plus' ? 'on' : ''}`} title="Add files and options" onClick={openMenu('plus')}>
+                <PlusIcon size={16} />
+              </button>
               {canAttach && (
-                <>
-                  <button type="button" className="ctl ai-attach" title="Attach files or images" onClick={() => fileInput.current?.click()}>
-                    <Icon name="attach" size={16} />
-                  </button>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    multiple
-                    hidden
-                    accept={ATTACH_EXT.map((x) => '.' + x).join(',')}
-                    onChange={(e) => {
-                      if (e.target.files) addFiles(e.target.files)
-                      e.target.value = ''
-                    }}
-                  />
-                </>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={ATTACH_EXT.map((x) => '.' + x).join(',')}
+                  onChange={(e) => {
+                    if (e.target.files) addFiles(e.target.files)
+                    e.target.value = ''
+                  }}
+                />
               )}
+              {agent && (
+                <button type="button" className={`ctl ai-bar-btn ${menu?.kind === 'approval' ? 'on' : ''}`} title="Choose approval mode" onClick={openMenu('approval')}>
+                  <Icon name="shield" size={16} />
+                </button>
+              )}
+              {menu?.kind === 'plus' && (
+                <ActionMenu
+                  className="ai-small-menu"
+                  search={false}
+                  style={{ left: menu.rect.left, bottom: innerHeight - menu.rect.top + 6, width: 240 }}
+                  onClose={() => setMenu(null)}
+                  entries={[
+                    { label: 'Add photos & files', icon: 'attach', disabled: !canAttach, title: canAttach ? undefined : 'Needs Claude (your subscription) and the local server', onClick: () => fileInput.current?.click() },
+                    { label: 'Mention a page', icon: 'page', kbd: '@', onClick: () => setPicker({ fromAt: false }) },
+                  ]}
+                />
+              )}
+              {menu?.kind === 'approval' && <ApprovalMenu rect={menu.rect} onClose={() => setMenu(null)} />}
               {agent ? <ModelPicker /> : <span className="ai-model">{activeModel(settings)}</span>}
               <span style={{ flex: 1 }} />
               {busy ? (
@@ -440,10 +482,53 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
               )}
             </div>
           </form>
+          {/* Notion's chat page: quick actions as chips under the composer. */}
+          {mode === 'full' && messages.length === 0 && (
+            <div className="ai-full-chips">
+              {(agent ? AGENT_QUICK : QUICK).map(([icon, q]) => (
+                <button key={q} className="ai-full-chip" onClick={() => send(q)}>
+                  <Icon name={icon} size={16} />
+                  <span>{q}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {dragging && <div className="ai-drop">Drop files to attach</div>}
         </>
       )}
     </aside>
+  )
+}
+
+/** Notion's approval menu, mapped to our file access setting (Settings → AI). */
+function ApprovalMenu({ rect, onClose }: { rect: DOMRect; onClose: () => void }) {
+  const settings = useStore((s) => s.settings)
+  const auto = settings.fileAccess === 'auto'
+  const set = (v: 'ask' | 'auto') => useStore.getState().saveSettings({ ...settings, fileAccess: v })
+  return (
+    <ActionMenu
+      className="ai-small-menu ai-approval-menu"
+      search={false}
+      style={{ left: Math.max(8, rect.left - 40), bottom: innerHeight - rect.top + 6, width: 330 }}
+      onClose={onClose}
+      header={<div className="ai-approval-head">How should AI ask for approval?</div>}
+      entries={[
+        { kind: 'node', node: <ApprovalRow label="Always ask" hint="Ask before reading or adding files outside the app" on={!auto} onClick={() => { set('ask'); onClose() }} /> },
+        { kind: 'node', node: <ApprovalRow label="Skip all approvals" hint="Act without asking. Use with caution." on={auto} warn onClick={() => { set('auto'); onClose() }} /> },
+      ]}
+    />
+  )
+}
+
+function ApprovalRow({ label, hint, on, warn, onClick }: { label: string; hint: string; on: boolean; warn?: boolean; onClick: () => void }) {
+  return (
+    <button className="ai-approval-row" onClick={onClick}>
+      <span>
+        <span className={`ai-approval-label ${warn ? 'warn' : ''}`}>{label}</span>
+        <span className="ai-approval-hint">{hint}</span>
+      </span>
+      {on && <Icon name="check" size={16} />}
+    </button>
   )
 }
 

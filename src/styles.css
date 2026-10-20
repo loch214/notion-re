@@ -214,6 +214,13 @@ a { color: inherit; text-decoration: underline; text-decoration-color: var(--lin
 .slash-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slash-kbd { font-size: 12px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
 .slash-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding: 0 16px; height: 33px; color: var(--muted); font-size: 14px; flex-shrink: 0; }
+.slash-list { overflow-y: auto; padding: 4px; min-height: 0; flex: 1; }
+.slash-menu .menu-section { padding: 8px 8px 4px; font-size: 12px; }
+.slash-item { gap: 8px; padding: 0 8px; height: 28px; border-radius: 6px; font-size: 14px; }
+.slash-icon { width: 20px; height: 20px; flex-shrink: 0; display: grid; place-items: center; font-size: 13px; font-weight: 600; color: var(--text); opacity: .85; line-height: 1; }
+.slash-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slash-kbd { font-size: 12px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
+.slash-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding: 0 16px; height: 33px; color: var(--muted); font-size: 14px; flex-shrink: 0; }
 .block-menu { position: absolute; left: 24px; top: 26px; width: 220px; max-height: 400px; overflow-y: auto; }
 .backdrop { position: fixed; inset: 0; z-index: 40; }
 .menu-section { font-size: 12px; color: var(--muted); padding: 6px 8px 4px; font-weight: 500; }
@@ -1218,3 +1225,7 @@ img.avatar { object-fit: cover; padding: 0; }
 .outline { top: 32vh; }
 .db-board { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .db-board:hover { scrollbar-color: var(--scrollbar, rgba(135,131,120,.4)) transparent; }
+.ai-model { font-size: 12px; color: var(--faint); }
+.ai-model-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 6px; font-size: 13px; color: var(--muted); }
+.ai-model-btn:hover { background: var(--bg-hover); color: var(--text); }
+.ai-model-menu .amenu-value { font-size: 12px; }

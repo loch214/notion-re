@@ -5,6 +5,7 @@ import { ASK_AI_EVENT, takePendingPrompt } from '../askAI'
 import { hasNamedStep, isServerMode, pageTitle, useStore } from '../store'
 import { Icon, type IconName } from './Icons'
 import { Markdown } from './Markdown'
+import { ActionMenu } from './Menu'
 
 const QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'List the action items']]
 const AGENT_QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['translate', 'Translate this page'], ['search', 'Analyze for insights'], ['checkCircle', 'Create a task tracker']]
@@ -426,7 +427,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                   />
                 </>
               )}
-              <span className="ai-model">{agent ? settings.models['claude-code'] || 'Claude' : activeModel(settings)}</span>
+              {agent ? <ModelPicker /> : <span className="ai-model">{activeModel(settings)}</span>}
               <span style={{ flex: 1 }} />
               {busy ? (
                 <button type="button" className="ai-send stop" title="Stop" onClick={() => abort.current?.abort()}>
@@ -443,6 +444,43 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
         </>
       )}
     </aside>
+  )
+}
+
+// Notion's composer model picker ("Auto ▾"). Auto lets Claude Code pick its default model.
+const CLAUDE_MODELS: [string, string, string][] = [
+  ['', 'Auto', 'Uses your Claude Code default'],
+  ['opus', 'Claude Opus', 'Most capable, for complex work'],
+  ['sonnet', 'Claude Sonnet', 'Fast and capable'],
+  ['haiku', 'Claude Haiku', 'Fastest, for quick tasks'],
+]
+
+function ModelPicker() {
+  const settings = useStore((s) => s.settings)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  const current = settings.models['claude-code'] ?? ''
+  const label = CLAUDE_MODELS.find(([id]) => id === current)?.[1] ?? current
+  return (
+    <>
+      <button type="button" className="ai-model-btn" title="Choose a model" onClick={(e) => setRect(rect ? null : e.currentTarget.getBoundingClientRect())}>
+        {label}
+        <Icon name="down" size={12} />
+      </button>
+      {rect && (
+        <ActionMenu
+          className="ai-model-menu"
+          search={false}
+          style={{ left: rect.left, bottom: innerHeight - rect.top + 6, width: 220 }}
+          onClose={() => setRect(null)}
+          entries={CLAUDE_MODELS.map(([id, name, hint]) => ({
+            label: name,
+            title: hint,
+            active: id === current,
+            onClick: () => useStore.getState().saveSettings({ ...settings, models: { ...settings.models, 'claude-code': id } }),
+          }))}
+        />
+      )}
+    </>
   )
 }
 

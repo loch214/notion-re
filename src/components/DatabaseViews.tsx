@@ -6,11 +6,12 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Icon, PlusIcon, type IconName } from './Icons'
 import { openRow } from './Peek'
 import { addDays, daysBetween, endDay, formatDateValue, formatTime, isoDay, moveDate, parseDate, RELATIVE_DAYS, shiftDate, startDay, toDate, todayIso, weekStartsMonday, WITHIN } from '../../shared/dates'
-import { cellRaw, coverCss, dbTemplates, htmlToPlain, isSingleChoice, shortId, statusOptions } from '../../shared/blocks.ts'
+import { cellRaw, coverCss, dbTemplates, htmlToPlain, isSingleChoice, OPTION_COLORS, shortId, statusOptions } from '../../shared/blocks.ts'
 import { applyView, boardGroups, getViews, needsValue, newView, OPERATORS, prefillFor, VIEW_TYPES } from '../../shared/views.ts'
 import { pageTitle, useStore } from '../store'
-import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator } from '../types'
-import { Cell, Pill, Popover, PropertyMenu, RowHandle, TableBody, TYPE_ICON } from './Database'
+import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator, SelectOption } from '../types'
+import { Cell, menuPos, Pill, Popover, PropertyMenu, RowHandle, rowMenuEntries, TableBody, TYPE_ICON } from './Database'
+import { ActionMenu, type MenuEntry } from './Menu'
 import { copyPageLink } from './PageMenu'
 
 const S = useStore.getState
@@ -133,7 +134,21 @@ export function DatabaseView({ dbId }: { dbId: string }) {
       )}
       {menu?.kind === 'templates' && <TemplatesMenu db={db} view={view} anchor={menu.rect} onClose={() => setMenu(null)} />}
 
-      {view.type === 'table' && <TableBody db={db} rows={rows} view={view} onNewRow={() => newRow()} />}
+      {view.type === 'table' && (
+        <TableBody
+          db={db}
+          rows={rows}
+          view={view}
+          onNewRow={() => newRow()}
+          onFilter={(propId) => {
+            // Header "Filter": add a rule for that column and open the filter menu, like Notion.
+            const prop = db.schema!.find((p) => p.id === propId)!
+            updateView(db, view.id, { filter: { ...view.filter, filters: [...view.filter.filters, defaultFilter(prop)] } })
+            const btn = boxRef.current?.querySelector('.db-tool')
+            if (btn) setMenu({ kind: 'filter', rect: btn.getBoundingClientRect() })
+          }}
+        />
+      )}
       {view.type === 'board' && <BoardBody db={db} rows={rows} view={view} newRow={newRow} />}
       {view.type === 'list' && <ListBody db={db} rows={rows} view={view} newRow={newRow} />}
       {view.type === 'gallery' && <GalleryBody db={db} rows={rows} view={view} newRow={newRow} />}
@@ -407,7 +422,7 @@ function ViewSettings({ top, db, view, onClose, canDelete, onFilter, onSort, onD
       <div className="popover vs-panel" style={{ top: Math.min(Math.max(8, top), innerHeight - 320), maxHeight: innerHeight - Math.min(Math.max(8, top), innerHeight - 320) - 12 }} onKeyDown={(e) => e.key === 'Escape' && close()}>
         {body}
       </div>
-      {propMenu && schema.some((p) => p.id === propMenu.propId) && <PropertyMenu db={db} propId={propMenu.propId} anchor={propMenu.rect} onClose={() => setPropMenu(null)} />}
+      {propMenu && schema.some((p) => p.id === propMenu.propId) && <PropertyMenu db={db} propId={propMenu.propId} anchor={propMenu.rect} onClose={() => setPropMenu(null)} startInEdit />}
     </>
   )
 }
@@ -577,17 +592,18 @@ function CardProps({ db, row, view, skip }: { db: Block; row: Block; view: DbVie
   )
 }
 
-function Card({ db, row, view, skip, children }: { db: Block; row: Block; view: DbView; skip?: string; children?: React.ReactNode }) {
+function Card({ db, row, view, skip, children, menu }: { db: Block; row: Block; view: DbView; skip?: string; children?: React.ReactNode; menu?: boolean }) {
+  const [open, setOpen] = useState<DOMRect | null>(null)
   return (
     <div
-      className="db-card"
+      className={`db-card ${open ? 'menu-open' : ''}`}
       data-row-id={row.id}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('application/x-db-row', row.id)
         e.dataTransfer.effectAllowed = 'move'
       }}
-      onClick={() => openRow(row.id, view)}
+      onClick={(e) => !(e.target as HTMLElement).closest('.db-card-more, .popover, .backdrop') && openRow(row.id, view)}
     >
       {children}
       <div className="db-card-title">
@@ -595,6 +611,12 @@ function Card({ db, row, view, skip, children }: { db: Block; row: Block; view: 
         {pageTitle(row)}
       </div>
       <CardProps db={db} row={row} view={view} skip={skip} />
+      {menu && (
+        <button className="ctl db-card-more" title="Edit, duplicate, delete…" onClick={(e) => setOpen(e.currentTarget.getBoundingClientRect())}>
+          <Icon name="more" size={16} />
+        </button>
+      )}
+      {open && <ActionMenu style={menuPos(open, 240)} onClose={() => setOpen(null)} search={false} entries={rowMenuEntries(row.id)} />}
     </div>
   )
 }
@@ -618,7 +640,11 @@ function dropProps(onDropRow: (rowId: string) => void) {
   }
 }
 
+const colorName = (c: string) => (c === 'default' ? 'Default' : c[0].toUpperCase() + c.slice(1))
+
+/** Notion's board: one tinted column per option (plus "No …"), a ⋯ group menu, and "Hidden groups" at the end. */
 function BoardBody({ db, rows, view, newRow }: BodyProps) {
+  const [groupMenu, setGroupMenu] = useState<{ id: string | null; rect: DOMRect } | null>(null)
   const board = boardGroups(db, view, rows)
   if (!board) {
     return (
@@ -631,20 +657,96 @@ function BoardBody({ db, rows, view, newRow }: BodyProps) {
     )
   }
   const { prop, groups } = board
+  const options = prop.options ?? []
+  const setOptions = (next: SelectOption[]) => S().updateBlock(db.id, { schema: db.schema!.map((p) => (p.id === prop.id ? { ...p, options: next } : p)) })
+  const setHidden = (key: string, hide: boolean) => {
+    const cur = view.hidden_groups ?? []
+    const next = hide ? [...cur.filter((k) => k !== key), key] : cur.filter((k) => k !== key)
+    updateView(db, view.id, { hidden_groups: next.length ? next : undefined })
+  }
+  const shown = groups.filter((g) => !g.hidden)
+  const hidden = groups.filter((g) => g.hidden)
+  const menuGroup = groupMenu && groups.find((g) => g.id === groupMenu.id)
+  const menuOption = menuGroup?.id ? options.find((o) => o.id === menuGroup.id) : undefined
+
   return (
     <div className="db-board">
-      {groups.map((g) => (
-        <div key={g.id ?? 'none'} className="db-board-col" {...dropProps((rowId) => S().setCell(rowId, prop.id, g.id))}>
+      {shown.map((g) => (
+        <div key={g.id ?? 'none'} className={`db-board-col tint-${g.id ? g.color : 'none'}`} {...dropProps((rowId) => S().setCell(rowId, prop.id, g.id))}>
           <div className="db-board-head">
-            {g.id ? <Pill option={{ id: g.id, name: g.label, color: g.color }} dot={prop.type === 'status'} /> : <span className="muted">{g.label}</span>}
-            <span className="muted small">{g.rows.length}</span>
+            {g.id ? <Pill option={{ id: g.id, name: g.label, color: g.color }} dot={prop.type === 'status'} /> : <span className="db-board-none">{g.label}</span>}
+            <span className="db-board-count">{g.rows.length}</span>
+            <span style={{ flex: 1 }} />
+            <button className="ctl db-board-btn" title="Hide, rename, colour…" onClick={(e) => setGroupMenu({ id: g.id, rect: e.currentTarget.getBoundingClientRect() })}>
+              <Icon name="more" size={16} />
+            </button>
+            <button className="ctl db-board-btn" title="New page" onClick={() => openRow(newRow({ [prop.id]: g.id }), view)}>
+              <PlusIcon size={14} />
+            </button>
           </div>
           {g.rows.map((r) => (
-            <Card key={r.id} db={db} row={r} view={view} skip={prop.id} />
+            <Card key={r.id} db={db} row={r} view={view} skip={prop.id} menu />
           ))}
-          <button className="db-card-new" onClick={() => openRow(newRow({ [prop.id]: g.id }), view)}>＋ New</button>
+          <button className="db-card-new" onClick={() => openRow(newRow({ [prop.id]: g.id }), view)}><PlusIcon size={14} /> New page</button>
         </div>
       ))}
+      <button
+        className="db-board-addgroup"
+        onClick={() => setOptions([...options, { id: shortId(), name: `Group ${options.length + 1}`, color: OPTION_COLORS[1 + (options.length % (OPTION_COLORS.length - 1))] }])}
+      >
+        <PlusIcon size={14} /> Add group
+      </button>
+      {hidden.length > 0 && (
+        <div className="db-board-hidden">
+          <div className="db-board-hidden-head">Hidden groups</div>
+          {hidden.map((g) => (
+            <button key={g.id ?? 'none'} className="db-board-hidden-row" title="Show this group" onClick={() => setHidden(g.id ?? '', false)} {...dropProps((rowId) => S().setCell(rowId, prop.id, g.id))}>
+              {g.id ? <Pill option={{ id: g.id, name: g.label, color: g.color }} dot={prop.type === 'status'} /> : <span className="db-board-none">{g.label}</span>}
+              <span className="db-board-count">{g.rows.length}</span>
+              <span style={{ flex: 1 }} />
+              <Icon name="eye" size={14} className="db-board-show" />
+            </button>
+          ))}
+        </div>
+      )}
+      {groupMenu && menuGroup && (
+        <ActionMenu
+          style={menuPos(groupMenu.rect, 240)}
+          onClose={() => setGroupMenu(null)}
+          search={false}
+          header={
+            menuOption && (
+              <input
+                className="pm-option-name"
+                autoFocus
+                defaultValue={menuOption.name}
+                onBlur={(e) => {
+                  const n = e.target.value.trim()
+                  if (n && n !== menuOption.name) setOptions(options.map((o) => (o.id === menuOption.id ? { ...o, name: n } : o)))
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
+            )
+          }
+          entries={[
+            { label: 'Hide', icon: 'eyeOff', onClick: () => setHidden(menuGroup.id ?? '', true) },
+            ...(menuOption
+              ? ([
+                  { label: 'Delete', icon: 'trash', danger: true, onClick: () => setOptions(options.filter((o) => o.id !== menuOption.id)) },
+                  { kind: 'sep' },
+                  { kind: 'section', label: 'Colors' },
+                  ...OPTION_COLORS.map((c) => ({
+                    label: colorName(c),
+                    icon: <span className={`db-color-swatch opt-${c}`} />,
+                    active: menuOption.color === c,
+                    keepOpen: true,
+                    onClick: () => setOptions(options.map((o) => (o.id === menuOption.id ? { ...o, color: c } : o))),
+                  })),
+                ] as MenuEntry[])
+              : []),
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -683,7 +785,7 @@ function GalleryBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className="db-gallery">
       {rows.map((r) => (
-        <Card key={r.id} db={db} row={r} view={view}>
+        <Card key={r.id} db={db} row={r} view={view} menu>
           {mode === 'page_cover' && <div className="db-gallery-cover" style={{ background: coverCss(r.format.cover) ?? 'var(--bg-hover)' }} />}
           {mode === 'page_content' && (
             <div className="db-gallery-preview">

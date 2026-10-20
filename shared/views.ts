@@ -211,7 +211,9 @@ export function boardGroups(db: Block, view: DbView, rows: Block[]) {
     const v = cellRaw(prop, r)
     ;(groups.find((g) => g.id === (typeof v === 'string' ? v : null)) ?? groups[0]).rows.push(r)
   }
-  return { prop, groups }
+  // Groups the view hides ("" = the "No …" group) go to Notion's "Hidden groups" list.
+  const hidden = new Set(view.hidden_groups ?? [])
+  return { prop, groups: groups.map((g) => ({ ...g, hidden: hidden.has(g.id ?? '') })) }
 }
 
 /** Plain-language summary of a view, for the AI. */
@@ -230,6 +232,11 @@ export function describeView(db: Block, view: DbView): string {
   }
   const parts = [`${view.name} (${view.type})`]
   if (view.group_by) parts.push(`grouped by ${name(view.group_by)}`)
+  if (view.hidden_groups?.length) {
+    const opts = schema.find((p) => p.id === view.group_by)?.options ?? []
+    parts.push(`hidden groups: ${view.hidden_groups.map((g) => (g ? opts.find((o) => o.id === g)?.name ?? g : `No ${name(view.group_by)}`)).join(', ')}`)
+  }
+  if (view.wrap?.length) parts.push(`wrapped columns: ${view.wrap.map(name).join(', ')}`)
   if (view.calendar_by) parts.push(`by date ${name(view.calendar_by)}`)
   if (view.timeline_by) parts.push(`timeline by ${name(view.timeline_by)}`)
   if (view.filter.filters.length) parts.push(`filter: ${view.filter.filters.map(label).join(view.filter.operator === 'or' ? ' OR ' : ' AND ')}`)

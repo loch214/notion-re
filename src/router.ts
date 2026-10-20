@@ -1,7 +1,7 @@
 // Page links: the open page lives in the URL as #/<pageId>, so links can be copied and the
 // browser's Back / Forward (and Notion's Ctrl+[ / Ctrl+]) walk through the pages you visited.
 
-import { useStore } from './store'
+import { HOME_ID, useStore } from './store'
 
 export const pageUrl = (id: string) => `${location.origin}${location.pathname}#/${id}`
 
@@ -20,6 +20,6 @@ export function startRouter() {
   window.addEventListener('popstate', () => {
     const id = hashPage()
     const S = useStore.getState()
-    if (id && S.blocks[id] && id !== S.currentPageId) S.openPage(id)
+    if (id && (S.blocks[id] || id === HOME_ID) && id !== S.currentPageId) S.openPage(id)
   })
 }

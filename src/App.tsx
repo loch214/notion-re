@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AIPanel } from './components/AIPanel'
 import { SearchModal, SettingsModal, ShortcutsModal, TrashModal } from './components/Modals'
 import { HistoryModal } from './components/HistoryModal'
@@ -8,10 +8,15 @@ import { Sidebar } from './components/Sidebar'
 import { FindBar } from './components/Find'
 import { Icon } from './components/Icons'
 import { FormatToolbar } from './components/FormatToolbar'
-import { pagePath, pageTitle, useStore } from './store'
+import { HOME_ID, pagePath, pageTitle, useStore } from './store'
+import { Home } from './components/Home'
+import { InboxPanel } from './components/Inbox'
+import { TemplatesModal } from './components/Templates'
+import { PeekPanel } from './components/Peek'
+import { useReminderTicker } from './reminders'
 import { toggleTheme } from './theme'
 
-type ModalKind = 'search' | 'settings' | 'trash' | 'shortcuts' | null
+type ModalKind = 'search' | 'settings' | 'trash' | 'shortcuts' | 'templates' | null
 
 /** "just now", "5 minutes ago", "3 hours ago", "Oct 18" — like Notion's "Edited …". */
 function timeAgo(ms: number) {
@@ -36,6 +41,9 @@ export default function App() {
   const [findOpen, setFindOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'account' | undefined>()
   const announcement = useStore((s) => s.announcement)
+  const [inboxLeft, setInboxLeft] = useState<number | null>(null)
+  const openInbox = useCallback(() => setInboxLeft(document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0), [])
+  useReminderTicker(openInbox)
 
   useEffect(() => {
     useStore.getState().load()
@@ -111,8 +119,8 @@ export default function App() {
 
   const page = currentPageId ? blocks[currentPageId] : undefined
   useEffect(() => {
-    document.title = page ? `${pageTitle(page)} · Notion(RE)` : 'Notion(RE)'
-  }, [page?.properties.title])
+    document.title = page ? `${pageTitle(page)} · Notion(RE)` : currentPageId === HOME_ID ? 'Home · Notion(RE)' : 'Notion(RE)'
+  }, [page?.properties.title, currentPageId])
 
   if (!loaded) return <div className="loading">Loading…</div>
 
@@ -128,7 +136,9 @@ export default function App() {
             setModal('settings')
           }}
           onTrash={() => setModal('trash')}
+          onTemplates={() => setModal('templates')}
           onAI={() => setAiOpen(true)}
+          onInbox={() => (inboxLeft === null ? openInbox() : setInboxLeft(null))}
           onCollapse={() => setSidebarOpen(false)}
         />
       )}
@@ -146,6 +156,11 @@ export default function App() {
             <Icon name="right" />
           </button>
           <div className="crumbs">
+            {currentPageId === HOME_ID && (
+              <span className="crumb-wrap">
+                <span className="crumb"><Icon name="home" size={16} /> Home</span>
+              </span>
+            )}
             {path.map((p, i) => (
               <span key={p.id} className="crumb-wrap">
                 {i > 0 && <span className="crumb-sep">/</span>}
@@ -184,7 +199,9 @@ export default function App() {
           </button>
         </header>
         <div className="scroll">
-          {page ? (
+          {currentPageId === HOME_ID ? (
+            <Home />
+          ) : page ? (
             <PageView key={page.id} pageId={page.id} />
           ) : (
             <div className="no-page">
@@ -194,6 +211,8 @@ export default function App() {
           )}
         </div>
       </main>
+      {inboxLeft !== null && <InboxPanel left={inboxLeft} onClose={() => setInboxLeft(null)} />}
+      <PeekPanel />
       {findOpen && <FindBar onClose={() => setFindOpen(false)} />}
       {modal === 'shortcuts' && <ShortcutsModal onClose={() => setModal(null)} />}
       {aiOpen && <AIPanel onClose={() => setAiOpen(false)} onSettings={() => setModal('settings')} />}
@@ -207,6 +226,7 @@ export default function App() {
       {modal === 'search' && <SearchModal onClose={() => setModal(null)} />}
       {modal === 'settings' && <SettingsModal tab={settingsTab} onClose={() => setModal(null)} />}
       {modal === 'trash' && <TrashModal onClose={() => setModal(null)} />}
+      {modal === 'templates' && <TemplatesModal onClose={() => setModal(null)} />}
     </div>
   )
 }

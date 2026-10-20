@@ -67,6 +67,13 @@ const PATHS = {
   translate: 'M3 5h8M7 3v2M9.5 5c-.7 3-2.6 5.3-5.5 6.5M5.5 7.5c.8 1.7 2.1 3 3.8 3.8M10.5 16.5l3-7.5 3 7.5M11.5 14.3h4',
   list: 'M7.5 5.5h9M7.5 10h9M7.5 14.5h9M3.8 5.5h.01M3.8 10h.01M3.8 14.5h.01',
   checkCircle: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM6.8 10.2l2.2 2.2 4.2-4.6',
+  bell: 'M5.5 13.5V9a4.5 4.5 0 0 1 9 0v4.5l1.3 1.5H4.2ZM8.3 15.8a1.8 1.8 0 0 0 3.4 0',
+  inbox: 'M3.5 11.5 5.3 4.5h9.4l1.8 7v4h-13ZM3.5 11.5h4l.8 1.8h3.4l.8-1.8h4',
+  calendar: 'M4 5.5h12v10.5H4ZM4 8.5h12M7 3.5v3M13 3.5v3',
+  clock: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM10 6.2V10l2.6 1.6',
+  template: 'M4 4h12v12H4ZM4 8h12M8.5 8v8',
+  timeline: 'M3.5 5.5h7M6.5 10h9M4.5 14.5h6',
+  peek: 'M3.5 4.5h13v11h-13ZM11.5 4.5v11',
 } as const
 
 export type IconName = keyof typeof PATHS

@@ -1,30 +1,36 @@
 import { useEffect, useState } from 'react'
 import { markdownToBlocks } from '../markdown'
-import { pageTitle, useStore } from '../store'
+import { HOME_ID, pageTitle, useStore } from '../store'
 import { Icon, PlusIcon, TriangleIcon } from './Icons'
 import { initials, useProfileName } from '../profile'
+import { useUnreadCount } from './Inbox'
 
 interface Props {
   onSearch: () => void
   onSettings: (tab?: 'account') => void
   onTrash: () => void
   onAI: () => void
+  onInbox: () => void
+  onTemplates: () => void
   onCollapse: () => void
 }
 
 const RECENT_KEY = 'notion-re:recent-pages'
 const WIDTH_KEY = 'notion-re:sidebar-width'
 
+/** Recently opened page ids, newest first (also used by Home). */
+export function readRecents(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+  } catch {
+    return []
+  }
+}
+
 function useRecents(current: string | null) {
-  const [ids, setIds] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
-    } catch {
-      return []
-    }
-  })
+  const [ids, setIds] = useState<string[]>(readRecents)
   useEffect(() => {
-    if (!current) return
+    if (!current || current === HOME_ID) return
     setIds((old) => {
       const next = [current, ...old.filter((i) => i !== current)].slice(0, 12)
       localStorage.setItem(RECENT_KEY, JSON.stringify(next))
@@ -61,7 +67,8 @@ export async function importMarkdown(files: FileList) {
   }
 }
 
-export function Sidebar({ onSearch, onSettings, onTrash, onAI, onCollapse }: Props) {
+export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTemplates, onCollapse }: Props) {
+  const unread = useUnreadCount()
   const rootPages = useStore((s) => s.rootPages)
   const blocks = useStore((s) => s.blocks)
   const createPage = useStore((s) => s.createPage)
@@ -121,8 +128,15 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onCollapse }: Pro
         <kbd>Ctrl+K</kbd>
       </button>
       <nav className="side-actions">
+        <button className={`side-item ${current === HOME_ID ? 'active' : ''}`} onClick={() => useStore.getState().openPage(HOME_ID)}>
+          <span className="side-ic"><Icon name="home" /></span> Home
+        </button>
         <button className="side-item" onClick={onAI}>
           <span className="side-ic"><Icon name="sparkle" /></span> AI chat
+        </button>
+        <button className="side-item" onClick={onInbox}>
+          <span className="side-ic"><Icon name="inbox" /></span> Inbox
+          {unread > 0 && <span className="side-badge">{unread}</span>}
         </button>
       </nav>
 
@@ -182,6 +196,9 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onCollapse }: Pro
       <div className="side-bottom">
         <button className="side-item" onClick={() => onSettings()}>
           <span className="side-ic"><Icon name="gear" /></span> Settings
+        </button>
+        <button className="side-item" onClick={onTemplates}>
+          <span className="side-ic"><Icon name="template" /></span> Templates
         </button>
         <label className="side-item">
           <span className="side-ic"><Icon name="import" /></span> Import

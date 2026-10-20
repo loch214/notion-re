@@ -15,8 +15,18 @@ paid built-in AI service.
 - **Notion-style editing**: `/` command menu, Markdown shortcuts (`#`, `-`, `1.`, `[]`, `>`, `"`,
   ```` ``` ````, `---`), Enter/Backspace splitting & merging, `Tab` / `Shift+Tab` nesting,
   drag-to-reorder, turn-into, duplicate
+- **Rich blocks**: images, videos, embeds, bookmarks, simple tables, columns, table of contents,
+  toggle headings, page mentions and backlinks, code blocks with syntax colours
 - **Pages**: nested page tree in the sidebar, icons, covers, breadcrumbs, search (`Ctrl+K`),
-  trash with restore
+  favorites, page styles (font, full width, background), find in page, Markdown import / export,
+  undo / redo, page history with restore, trash with restore
+- **Home, Inbox and Templates**: a start page with recently visited pages, upcoming dates and
+  your tasks; reminders on dates with an Inbox and desktop notifications; ready-made templates
+  (task tracker, journal, reading list, meeting notes, projects, weekly planner…)
+- **Databases**: full-page and inline, with table, board, list, gallery, calendar (month / week)
+  and timeline views; filters (including relative dates), sorts, hidden columns, sub-items,
+  a calculate row (sum, average, count…), number formats and currencies, a Notion-style date
+  picker with ranges and times, row templates, and rows that open in a side peek
 - **Bring-your-own AI**: Anthropic (Claude), OpenAI, Google Gemini, or any OpenAI-compatible
   endpoint (OpenRouter, Groq, Ollama…)
   - Press `Space` on an empty line (or `/ai`) to have AI write into the page
@@ -24,9 +34,12 @@ paid built-in AI service.
   - Responses stream in live; keys are stored only in the browser
 - **Built-in Claude assistant**: the AI panel runs on the owner's own Claude (no API key) and
   works as an agent — it can read, search, create and edit pages and blocks, and its changes
-  appear live in the open app.
+  appear live in the open app. It can also read files on the computer (documents, PDFs,
+  images, Word / PowerPoint / Excel) and bring them into pages — read-only, limited to chosen
+  folders, and either asking before every file or automatic.
 - **Local-first**: the workspace is a file on your own computer, synced live to every open
   tab — no account, no cloud. Falls back to browser storage when run without the local server.
+- **Desktop app**: runs in its own window from the Start menu, with a tray icon
 - Light & dark mode
 
 ## How it was made

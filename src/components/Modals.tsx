@@ -27,7 +27,7 @@ function Modal({ title, onClose, children, wide }: { title?: string; onClose: ()
   )
 }
 
-type SettingsTab = 'account' | 'preferences' | 'ai' | 'import' | 'shortcuts'
+export type SettingsTab = 'account' | 'preferences' | 'notifications' | 'sidebar' | 'ai' | 'import' | 'shortcuts'
 
 /** One settings row: name + description on the left, the control on the right (Notion's layout). */
 function Row({ title, desc, children }: { title: string; desc?: ReactNode; children: ReactNode }) {

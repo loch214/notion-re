@@ -1,7 +1,7 @@
 // Blocks that aren't a line of text: image, video, embed, web bookmark, simple table,
-// table of contents, columns.
+// table of contents, columns, and the floating page outline.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { embedUrl, mediaUrlOk } from '../../shared/blocks.ts'
 import { htmlToText, sanitizeHtml } from '../markdown'
 import { useStore, visibleOrder } from '../store'
@@ -300,6 +300,48 @@ export function Columns({ block, pageId, locked }: { block: Block; pageId: strin
           </div>,
         ]
       })}
+    </div>
+  )
+}
+
+/** Notion's floating outline on the right of a page: one short line per heading (longer for bigger
+ * headings, the one you're reading highlighted); hover to see the headings, click to jump. */
+export function PageOutline({ pageId }: { pageId: string }) {
+  const blocks = useStore((s) => s.blocks)
+  const heads = visibleOrder(blocks, pageId).filter((id) => HEADINGS.has(blocks[id].type))
+  const [current, setCurrent] = useState<string | null>(null)
+  useEffect(() => {
+    const onScroll = () => {
+      let cur: string | null = null
+      for (const id of heads) {
+        const el = document.querySelector(`.page [data-block-id="${id}"]`)
+        if (el && el.getBoundingClientRect().top < 160) cur = id
+      }
+      setCurrent(cur ?? heads[0] ?? null)
+    }
+    onScroll()
+    document.addEventListener('scroll', onScroll, true)
+    return () => document.removeEventListener('scroll', onScroll, true)
+  }, [heads.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (heads.length < 2) return null
+  const level = (t: string) => ['header', 'sub_header', 'sub_sub_header', 'header_4'].indexOf(t)
+  const go = (id: string) => document.querySelector(`[data-block-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  return (
+    <div className="outline-anchor">
+      <div className="outline">
+        <div className="outline-lines">
+          {heads.map((id) => (
+            <span key={id} className={`outline-line l${level(blocks[id].type)} ${id === current ? 'on' : ''}`} />
+          ))}
+        </div>
+        <div className="outline-panel popover">
+          {heads.map((id) => (
+            <div key={id} className={`outline-item ${id === current ? 'on' : ''}`} style={{ paddingLeft: 8 + level(blocks[id].type) * 12 }} onClick={() => go(id)}>
+              {htmlToText(blocks[id].properties.title) || 'Untitled'}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { CoverPicker, EmojiPicker } from './Pickers'
 import { BlockSelection } from './BlockSelection'
 import { RowProperties } from './Database'
 import { DatabaseView } from './DatabaseViews'
+import { PageOutline } from './SpecialBlocks'
 
 const COVERS = Object.keys(COVER_PRESETS)
 
@@ -67,6 +68,7 @@ export function PageView({ pageId }: { pageId: string }) {
 
   return (
     <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''} ${f.small_text ? 'small-text' : ''} ${locked ? 'locked' : ''}`}>
+      {!isDb && !f.hide_outline && <PageOutline pageId={pageId} />}
       {f.template && page.parent_id && (
         <div className="template-banner">
           You’re editing a template in

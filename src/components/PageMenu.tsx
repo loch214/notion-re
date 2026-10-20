@@ -1,8 +1,13 @@
-// "⋯" menu in the top bar, in Notion's order: font, Small text / Full width, Lock page, look
-// (background, cover), then page actions (Favorites, Copy link, Duplicate, Move to, Trash,
-// Version history, Export).
+// "⋯" menu in the top bar, in Notion's current order: Search actions, Copy link, Copy page contents,
+// Duplicate, Move to, Version history, Appearance & layout ▸ (font, Small text, Full width, Table of
+// contents, plus our page background and cover), Use with AI ▸, Lock page, Move to Trash, More ▸,
+// and a "Last edited" footer with the word count.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { askAI } from '../askAI'
+import { getProfileName } from '../profile'
+import { ActionMenu, EditedFooter, type MenuEntry } from './Menu'
+import { importMarkdown } from './Sidebar'
 import { COLOR_NAMES, COVER_PRESETS, pageToMarkdown } from '../../shared/blocks.ts'
 import { pageUrl } from '../router'
 import { pagePath, pageTitle, useStore } from '../store'
@@ -12,7 +17,7 @@ const FONTS: { font: PageFont; label: string; tip: string }[] = [
   { font: 'default', label: 'Default', tip: 'The default sans-serif workhorse' },
   { font: 'serif', label: 'Serif', tip: 'Good for publishing' },
   { font: 'mono', label: 'Mono', tip: 'Good for drafting and notes' },
-  { font: 'comic', label: 'Comic', tip: 'Playful but cringe' },
+
 ]
 
 /** Ctrl+L / "Copy link": the page's #/<id> address, with Notion's toast. */
@@ -46,103 +51,117 @@ export function PageMenu({ pageId, onClose, onHistory, onMove }: { pageId: strin
   if (!page) return null
   const f = page.format
   const font = f.page_font ?? 'default'
-  const act = (fn: () => void) => () => {
-    onClose()
-    fn()
-  }
+  const set = (format: Partial<typeof f>) => S().updateBlock(pageId, { format })
+  const markdown = () => pageToMarkdown(S().blocks, pageId)
+  const words = markdown().split(/\s+/).filter((w) => /\w/.test(w)).length
 
-  return (
+  const look = (
     <>
-      <div className="backdrop" onClick={onClose} />
-      <div className="popover page-menu">
-        <div className="menu-section">Style</div>
-        <div className="font-picker">
-          {FONTS.map((x) => (
-            <button
-              key={x.font}
-              title={x.tip}
-              className={`${font === x.font ? 'on' : ''} font-sample-${x.font}`}
-              onClick={() => S().updateBlock(pageId, { format: { page_font: x.font === 'default' ? undefined : x.font } })}
-            >
-              <span className="font-ag">Ag</span>
-              <span className="font-name">{x.label}</span>
-            </button>
-          ))}
-        </div>
-        <Switch label="Small text" on={!!f.small_text} set={(v) => S().updateBlock(pageId, { format: { small_text: v || undefined } })} />
-        <Switch label="Full width" on={!!f.full_width} set={(v) => S().updateBlock(pageId, { format: { full_width: v || undefined } })} />
-        <div className="menu-sep" />
-        <Switch label="Lock page" on={!!f.locked} set={(v) => S().updateBlock(pageId, { format: { locked: v || undefined } })} />
-
-        <div className="menu-section">Page background</div>
-        <div className="swatches">
-          <button className={!f.background ? 'on' : ''} title="None" style={{ background: 'var(--bg)' }} onClick={() => S().updateBlock(pageId, { format: { background: undefined } })} />
-          {COLOR_NAMES.map((c) => (
-            <button
-              key={c}
-              className={f.background === c ? 'on' : ''}
-              title={c}
-              style={{ background: `var(--bg-${c})` }}
-              onClick={() => S().updateBlock(pageId, { format: { background: c } })}
-            />
-          ))}
-        </div>
-
-        <div className="menu-section">Cover</div>
-        <div className="swatches">
-          <button className={!f.cover ? 'on' : ''} title="No cover" onClick={() => S().updateBlock(pageId, { format: { cover: undefined } })}>
-            ✕
+      <div className="amenu-section">Font style</div>
+      <div className="font-picker">
+        {FONTS.map((x) => (
+          <button key={x.font} title={x.tip} className={`${font === x.font ? 'on' : ''} font-sample-${x.font}`} onClick={() => set({ page_font: x.font === 'default' ? undefined : x.font })}>
+            <span className="font-ag">Ag</span>
+            <span className="font-name">{x.label}</span>
           </button>
-          {Object.entries(COVER_PRESETS).map(([name, css]) => (
-            <button
-              key={name}
-              className={f.cover === name || f.cover === css ? 'on' : ''}
-              title={name}
-              style={{ background: css }}
-              onClick={() => S().updateBlock(pageId, { format: { cover: name } })}
-            />
-          ))}
-        </div>
-
-        <div className="menu-sep" />
-        <div className="menu-item" onClick={act(() => toggleFavorite(pageId))}>
-          <span className="menu-icon">{f.favorite ? '★' : '☆'}</span> {f.favorite ? 'Remove from Favorites' : 'Add to Favorites'}
-        </div>
-        <div className="menu-item" onClick={act(() => copyPageLink(pageId))}>
-          <span className="menu-icon">🔗</span> Copy link <kbd>Ctrl+L</kbd>
-        </div>
-        <div className="menu-item" onClick={act(() => S().openPage(S().duplicate(pageId)))}>
-          <span className="menu-icon">⧉</span> Duplicate
-        </div>
-        <div className="menu-item" onClick={act(onMove)}>
-          <span className="menu-icon">↪</span> Move to <kbd>Ctrl+Shift+P</kbd>
-        </div>
-        <div
-          className={`menu-item ${f.locked ? 'disabled' : ''}`}
-          title={f.locked ? 'Unlock this page to move it to Trash.' : undefined}
-          onClick={f.locked ? undefined : act(() => S().removeBlock(pageId))}
-        >
-          <span className="menu-icon">🗑</span> Move to Trash
-        </div>
-        <div className="menu-sep" />
-        <div className="menu-item" onClick={act(onHistory)}>
-          <span className="menu-icon">🕘</span> Version history
-        </div>
-        <div className="menu-item" onClick={act(() => exportMarkdown(pageId))}>
-          <span className="menu-icon">⤓</span> Export as Markdown
-        </div>
+        ))}
       </div>
     </>
   )
+  const colours = (
+    <>
+      <div className="amenu-section">Page background</div>
+      <div className="swatches">
+        <button className={!f.background ? 'on' : ''} title="None" style={{ background: 'var(--bg)' }} onClick={() => set({ background: undefined })} />
+        {COLOR_NAMES.map((c) => (
+          <button key={c} className={f.background === c ? 'on' : ''} title={c} style={{ background: `var(--bg-${c})` }} onClick={() => set({ background: c })} />
+        ))}
+      </div>
+      <div className="amenu-section">Cover</div>
+      <div className="swatches">
+        <button className={!f.cover ? 'on' : ''} title="No cover" onClick={() => set({ cover: undefined })}>
+          ✕
+        </button>
+        {Object.entries(COVER_PRESETS).map(([name, css]) => (
+          <button key={name} className={f.cover === name || f.cover === css ? 'on' : ''} title={name} style={{ background: css }} onClick={() => set({ cover: name })} />
+        ))}
+      </div>
+    </>
+  )
+
+  const entries: MenuEntry[] = [
+    { label: 'Copy link', icon: 'link', kbd: 'Ctrl+L', onClick: () => copyPageLink(pageId) },
+    {
+      label: 'Copy page contents',
+      icon: 'copy',
+      onClick: () => navigator.clipboard.writeText(markdown()).then(() => S().showToast({ label: 'Copied page contents' })),
+    },
+    { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().openPage(S().duplicate(pageId)) },
+    { label: 'Move to', icon: 'moveTo', kbd: 'Ctrl+Shift+P', onClick: onMove },
+    { label: 'Version history', icon: 'history', keywords: 'undo restore', onClick: onHistory },
+    { kind: 'sep' },
+    {
+      label: 'Appearance & layout',
+      icon: 'text',
+      keywords: 'font style',
+      subWidth: 270,
+      subNode: look,
+      sub: [
+        { kind: 'section', label: 'Appearance' },
+        { label: 'Small text', icon: 'smallText', toggle: !!f.small_text, onClick: () => set({ small_text: !f.small_text || undefined }) },
+        { label: 'Full width', icon: 'fullWidth', toggle: !!f.full_width, onClick: () => set({ full_width: !f.full_width || undefined }) },
+        { label: 'Table of contents', icon: 'list', keywords: 'outline', toggle: !f.hide_outline, onClick: () => set({ hide_outline: !f.hide_outline || undefined }) },
+        { kind: 'node', node: colours },
+      ],
+    },
+    {
+      label: 'Use with AI',
+      icon: 'sparkle',
+      sub: [
+        { label: 'Summarize this page', icon: 'list', onClick: () => askAI('Summarize this page') },
+        { label: 'Translate this page', icon: 'translate', onClick: () => askAI('Translate this page into English (if it is already English, ask me which language)') },
+        { label: 'Make this page look nicer', icon: 'palette', onClick: () => askAI('Make this page look nicer: tidy the structure and add a little colour, an icon and a cover.') },
+        { label: 'Ask about this page', icon: 'chat', onClick: () => askAI('') },
+      ],
+    },
+    { kind: 'sep' },
+    { label: 'Lock page', icon: f.locked ? 'lock' : 'unlock', toggle: !!f.locked, onClick: () => set({ locked: !f.locked || undefined }) },
+    {
+      label: 'Move to Trash',
+      icon: 'trash',
+      disabled: !!f.locked,
+      title: f.locked ? 'Unlock this page to move it to Trash.' : undefined,
+      onClick: () => S().removeBlock(pageId),
+    },
+    { kind: 'sep' },
+    {
+      label: 'More',
+      icon: 'more',
+      sub: [
+        { label: f.favorite ? 'Remove from Favorites' : 'Add to Favorites', icon: 'star', onClick: () => toggleFavorite(pageId) },
+        { label: 'Export as Markdown', icon: 'export', keywords: 'download', onClick: () => exportMarkdown(pageId) },
+        { label: 'Import', icon: 'import', keywords: 'markdown', onClick: pickImport },
+      ],
+    },
+  ]
+
+  return (
+    <ActionMenu
+      className="page-menu"
+      entries={entries}
+      onClose={onClose}
+      footer={<EditedFooter name={getProfileName()} time={page.last_edited_time} extra={`${words.toLocaleString()} word${words === 1 ? '' : 's'}`} />}
+    />
+  )
 }
 
-function Switch({ label, on, set }: { label: string; on: boolean; set: (v: boolean) => void }) {
-  return (
-    <div className="menu-item switch-row" role="switch" aria-checked={on} onClick={() => set(!on)}>
-      <span>{label}</span>
-      <span className={`switch ${on ? 'on' : ''}`} />
-    </div>
-  )
+function pickImport() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.md,.markdown,.txt'
+  input.multiple = true
+  input.onchange = () => input.files?.length && importMarkdown(input.files)
+  input.click()
 }
 
 /** "Move to" picker: search a page to move this one into, or back to the top level. */

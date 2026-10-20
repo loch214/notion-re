@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { activeModel, answerPermission, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage, type PermissionRequest } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
+import { ASK_AI_EVENT, takePendingPrompt } from '../askAI'
 import { hasNamedStep, isServerMode, pageTitle, useStore } from '../store'
 import { Icon, type IconName } from './Icons'
 import { Markdown } from './Markdown'
@@ -99,10 +100,29 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
     }).catch(() => {})
   }, [messages, busy, chatId, canSave])
 
+  // Prompts sent from menus ("Use with AI" → Summarize…); an empty one just focuses the composer.
+  const sendRef = useRef<(t: string) => void>(() => {})
+  const newChatRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    const take = () => {
+      const p = takePendingPrompt()
+      if (!p) return
+      if (p.fresh) newChatRef.current()
+      if (p.prompt) setTimeout(() => sendRef.current(p.prompt), 50)
+      else setTimeout(() => document.querySelector<HTMLTextAreaElement>('.ai-compose textarea')?.focus(), 50)
+    }
+    take()
+    window.addEventListener(ASK_AI_EVENT, take)
+    return () => window.removeEventListener(ASK_AI_EVENT, take)
+  }, [])
+
   const updateLast = (fn: (m: PanelMessage) => PanelMessage) =>
     setMessages((ms) => [...ms.slice(0, -1), fn(ms[ms.length - 1])])
 
+  // Bumped by New chat so a slow "reopen last chat" doesn't overwrite it.
+  const generation = useRef(0)
   const newChat = () => {
+    generation.current++
     abort.current?.abort()
     setMessages([])
     setAttached([])
@@ -114,7 +134,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   }
 
   async function openChat(id: string) {
+    const gen = ++generation.current
     const r = await fetch(`/api/chats/${id}`).catch(() => null)
+    if (gen !== generation.current) return
     if (!r?.ok) return localStorage.removeItem(OPEN_CHAT_KEY)
     const c = await r.json()
     abort.current?.abort()
@@ -224,6 +246,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
       setBusy(false)
     }
   }
+
+  sendRef.current = send
+  newChatRef.current = newChat
 
   const insertIntoPage = (text: string) => {
     if (!pageId) return

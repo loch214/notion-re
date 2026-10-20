@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AIPanel } from './components/AIPanel'
+import { ASK_AI_EVENT, askAI } from './askAI'
+import type { SettingsTab } from './components/Modals'
 import { SearchModal, SettingsModal, ShortcutsModal, TrashModal } from './components/Modals'
 import { HistoryModal } from './components/HistoryModal'
 import { copyPageLink, MovePageModal, PageMenu, toggleFavorite } from './components/PageMenu'
@@ -34,12 +36,17 @@ export default function App() {
   const blocks = useStore((s) => s.blocks)
   const [modal, setModal] = useState<ModalKind>(null)
   const [aiOpen, setAiOpen] = useState(false)
+  useEffect(() => {
+    const open = () => setAiOpen(true)
+    window.addEventListener(ASK_AI_EVENT, open)
+    return () => window.removeEventListener(ASK_AI_EVENT, open)
+  }, [])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pageMenuOpen, setPageMenuOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'account' | undefined>()
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>()
   const announcement = useStore((s) => s.announcement)
   const [inboxLeft, setInboxLeft] = useState<number | null>(null)
   const openInbox = useCallback(() => setInboxLeft(document.querySelector('.sidebar')?.getBoundingClientRect().right ?? 0), [])
@@ -137,7 +144,8 @@ export default function App() {
           }}
           onTrash={() => setModal('trash')}
           onTemplates={() => setModal('templates')}
-          onAI={() => setAiOpen(true)}
+          onAI={() => askAI('', true)}
+          onShortcuts={() => setModal('shortcuts')}
           onInbox={() => (inboxLeft === null ? openInbox() : setInboxLeft(null))}
           onCollapse={() => setSidebarOpen(false)}
         />
@@ -194,9 +202,6 @@ export default function App() {
               <Icon name="more" />
             </button>
           )}
-          <button className={`ctl top-ctl ${aiOpen ? 'on' : ''}`} onClick={() => setAiOpen(!aiOpen)} title="AI chat (Ctrl+J)">
-            <Icon name="sparkle" />
-          </button>
         </header>
         <div className="scroll">
           {currentPageId === HOME_ID ? (
@@ -210,6 +215,12 @@ export default function App() {
             </div>
           )}
         </div>
+        {/* Notion's round AI button in the bottom-right corner opens the AI panel. */}
+        {!aiOpen && (
+          <button className="ai-fab" title="AI chat (Ctrl+J)" onClick={() => setAiOpen(true)}>
+            <Icon name="sparkle" size={22} />
+          </button>
+        )}
       </main>
       {inboxLeft !== null && <InboxPanel left={inboxLeft} onClose={() => setInboxLeft(null)} />}
       <PeekPanel />

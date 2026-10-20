@@ -21,6 +21,9 @@ import { EmojiPicker } from './Pickers'
 import { DatabaseView } from './DatabaseViews'
 import { AIInline } from './AIInline'
 import { DragIcon, PlusIcon, TriangleIcon } from './Icons'
+import { ActionMenu, EditedFooter, type MenuEntry } from './Menu'
+import { getProfileName } from '../profile'
+import { blockUrl } from '../router'
 import { filterMenu, MENU_ITEMS, SlashMenu, type MenuItem } from './SlashMenu'
 import { Columns, MediaBlock, TableBlock, TableOfContents } from './SpecialBlocks'
 
@@ -215,7 +218,7 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     return () => row.removeEventListener('nre:ask-ai', open)
   }, [])
   const [dropPos, setDropPos] = useState<'before' | 'after' | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState<DOMRect | null>(null)
 
   const isCode = block.type === 'code'
 
@@ -846,11 +849,11 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
               e.dataTransfer.setData('application/x-block', id)
               e.dataTransfer.effectAllowed = 'move'
             }}
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={(e) => setMenuOpen(menuOpen ? null : e.currentTarget.getBoundingClientRect())}
           >
             <DragIcon />
           </span>
-          {menuOpen && <BlockMenu id={id} onClose={() => setMenuOpen(false)} />}
+          {menuOpen && <BlockMenu id={id} pageId={pageId} anchor={menuOpen} onClose={() => setMenuOpen(null)} onAskAI={() => setAiOpen(true)} />}
         </div>
 
         {block.type === 'divider' ? (
@@ -978,65 +981,67 @@ function InlineDatabase({ block, locked }: { block: Block; locked: boolean }) {
   )
 }
 
-function BlockMenu({ id, onClose }: { id: string; onClose: () => void }) {
+const COLOR_LABEL = (c: string) => c[0].toUpperCase() + c.slice(1)
+
+/** The ⋮⋮ block menu in Notion's current layout: search, Turn into ▸, Color ▸, Copy link to block,
+ * Duplicate, Move to (pages), Delete, Ask AI, and who edited the block last. */
+function BlockMenu({ id, pageId, anchor, onClose, onAskAI }: { id: string; pageId: string; anchor: DOMRect; onClose: () => void; onAskAI: () => void }) {
   const S = useStore.getState
-  const isPage = S().blocks[id]?.type === 'page'
-  const turnInto = isPage || NOT_EDITABLE.has(S().blocks[id]?.type) ? [] : MENU_ITEMS.filter((i) => !['ai', 'page', 'database'].includes(i.key) && !NOT_EDITABLE.has(i.key as BlockType) && !i.key.startsWith('columns_'))
-  const color = S().blocks[id]?.format.color
-  const setColor = (c: BlockColor | undefined) => {
-    S().updateBlock(id, { format: { color: c } })
-    onClose()
-  }
+  const block = S().blocks[id]
+  if (!block) return null
+  const isPage = block.type === 'page'
+  const turnInto = isPage || NOT_EDITABLE.has(block.type) ? [] : MENU_ITEMS.filter((i) => !['ai', 'page', 'database', 'database_inline', 'link_page'].includes(i.key) && !NOT_EDITABLE.has(i.key as BlockType) && !i.key.startsWith('columns_'))
+  const color = block.format.color
+  const typeLabel = isPage ? 'Page' : MENU_ITEMS.find((i) => i.key === block.type)?.label ?? 'Block'
+  const swatch = (c?: string, bg?: boolean) => (
+    <span className="amenu-swatch" style={bg ? { background: c ? `var(--bg-${c})` : undefined } : { color: c ? `var(--c-${c})` : undefined }}>A</span>
+  )
+  const entries: MenuEntry[] = [
+    { kind: 'section', label: typeLabel },
+    ...(turnInto.length
+      ? [
+          {
+            label: 'Turn into',
+            icon: 'turnInto',
+            subWidth: 240,
+            sub: turnInto.map((i): MenuEntry => ({ label: i.label, icon: <span className="amenu-type-icon">{i.icon}</span>, active: i.key === block.type, keywords: 'turn into', onClick: () => S().setType(id, i.key as BlockType) })),
+          } as MenuEntry,
+        ]
+      : []),
+    {
+      label: 'Color',
+      icon: 'palette',
+      keywords: 'colour',
+      subWidth: 220,
+      sub: [
+        { kind: 'section', label: 'Text color' },
+        { label: 'Default text', icon: swatch(), active: !color, keywords: 'color', onClick: () => S().updateBlock(id, { format: { color: undefined } }) },
+        ...COLOR_NAMES.map((c): MenuEntry => ({ label: `${COLOR_LABEL(c)} text`, icon: swatch(c), active: color === c, keywords: 'color colour', onClick: () => S().updateBlock(id, { format: { color: c } }) })),
+        { kind: 'section', label: 'Background color' },
+        { label: 'Default background', icon: swatch(undefined, true), keywords: 'color', onClick: () => S().updateBlock(id, { format: { color: undefined } }) },
+        ...COLOR_NAMES.map((c): MenuEntry => ({ label: `${COLOR_LABEL(c)} background`, icon: swatch(c, true), active: color === `${c}_background`, keywords: 'color colour highlight', onClick: () => S().updateBlock(id, { format: { color: `${c}_background` as BlockColor } }) })),
+      ],
+    },
+    { kind: 'sep' },
+    {
+      label: 'Copy link to block',
+      icon: 'link',
+      kbd: 'Alt+Shift+L',
+      onClick: () => navigator.clipboard.writeText(blockUrl(pageId, id)).then(() => S().showToast({ label: 'Copied link to block' })),
+    },
+    { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().duplicate(id) },
+    { label: 'Delete', icon: 'trash', kbd: 'Del', danger: true, onClick: () => S().removeBlock(id) },
+    { kind: 'sep' },
+    { label: 'Ask AI', icon: 'sparkle', kbd: 'Ctrl+J', onClick: onAskAI },
+  ]
+  const top = Math.min(anchor.bottom + 4, innerHeight - 440)
   return (
-    <>
-      <div className="backdrop" onClick={onClose} />
-      <div className="popover block-menu">
-        <div
-          className="menu-item"
-          onClick={() => {
-            S().removeBlock(id)
-            onClose()
-          }}
-        >
-          🗑 Delete
-        </div>
-        <div
-          className="menu-item"
-          onClick={() => {
-            S().duplicate(id)
-            onClose()
-          }}
-        >
-          ⧉ Duplicate
-        </div>
-        <div className="menu-section">Colour</div>
-        <div className="menu-item" onClick={() => setColor(undefined)}>
-          <span className="color-swatch">A</span> Default
-        </div>
-        {COLOR_NAMES.map((c) => (
-          <div key={c} className={`menu-item ${color === c ? 'active' : ''}`} onClick={() => setColor(c)}>
-            <span className="color-swatch" style={{ color: `var(--c-${c})` }}>A</span> {c[0].toUpperCase() + c.slice(1)} text
-          </div>
-        ))}
-        {COLOR_NAMES.map((c) => (
-          <div key={c} className={`menu-item ${color === `${c}_background` ? 'active' : ''}`} onClick={() => setColor(`${c}_background`)}>
-            <span className="color-swatch" style={{ background: `var(--bg-${c})` }}>A</span> {c[0].toUpperCase() + c.slice(1)} background
-          </div>
-        ))}
-        {!isPage && <div className="menu-section">Turn into</div>}
-        {turnInto.map((i) => (
-          <div
-            key={i.key}
-            className="menu-item"
-            onClick={() => {
-              S().setType(id, i.key as BlockType)
-              onClose()
-            }}
-          >
-            <span className="menu-icon">{i.icon}</span> {i.label}
-          </div>
-        ))}
-      </div>
-    </>
+    <ActionMenu
+      className="block-menu"
+      style={{ left: Math.min(anchor.left, innerWidth - 280), top: Math.max(8, top) }}
+      entries={entries}
+      onClose={onClose}
+      footer={<EditedFooter name={getProfileName()} time={block.last_edited_time} />}
+    />
   )
 }

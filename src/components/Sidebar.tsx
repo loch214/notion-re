@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react'
 import { markdownToBlocks } from '../markdown'
 import { HOME_ID, pageTitle, useStore } from '../store'
 import { Icon, PlusIcon, TriangleIcon } from './Icons'
-import { initials, useProfileName } from '../profile'
+import { Avatar, initials, useProfile } from '../profile'
+import { addDays, formatDay, todayIso } from '../../shared/dates'
+import { upcoming } from '../../shared/home'
+import { ActionMenu } from './Menu'
 import { useUnreadCount } from './Inbox'
 
 interface Props {
   onSearch: () => void
-  onSettings: (tab?: 'account') => void
+  onSettings: (tab?: 'account' | 'sidebar') => void
+  onShortcuts: () => void
   onTrash: () => void
   onAI: () => void
   onInbox: () => void
@@ -17,6 +21,40 @@ interface Props {
 
 const RECENT_KEY = 'notion-re:recent-pages'
 const WIDTH_KEY = 'notion-re:sidebar-width'
+
+/** Settings → Sidebar: which optional sections to hide (kept in this browser). */
+export interface SidebarPrefs {
+  upcoming?: boolean
+  recent?: boolean
+  inbox?: boolean
+}
+const PREFS_KEY = 'notion-re:sidebar-hide'
+const prefListeners = new Set<() => void>()
+let prefCache: SidebarPrefs | null = null
+export function getSidebarPrefs(): SidebarPrefs {
+  if (!prefCache) {
+    try {
+      prefCache = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')
+    } catch {
+      prefCache = {}
+    }
+  }
+  return prefCache!
+}
+export function setSidebarPrefs(p: SidebarPrefs) {
+  prefCache = p
+  localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+  prefListeners.forEach((l) => l())
+}
+export function useSidebarPrefs() {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const l = () => tick((n) => n + 1)
+    prefListeners.add(l)
+    return () => void prefListeners.delete(l)
+  }, [])
+  return getSidebarPrefs()
+}
 
 /** Recently opened page ids, newest first (also used by Home). */
 export function readRecents(): string[] {
@@ -67,13 +105,18 @@ export async function importMarkdown(files: FileList) {
   }
 }
 
-export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTemplates, onCollapse }: Props) {
+export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTemplates, onCollapse, onShortcuts }: Props) {
   const unread = useUnreadCount()
   const rootPages = useStore((s) => s.rootPages)
   const blocks = useStore((s) => s.blocks)
   const createPage = useStore((s) => s.createPage)
   const current = useStore((s) => s.currentPageId)
-  const name = useProfileName()
+  const { name, email } = useProfile()
+  const prefs = useSidebarPrefs()
+  const [profileMenu, setProfileMenu] = useState(false)
+  const today = todayIso()
+  const dayLabel = (d: string) => (d === today ? 'Today' : d === addDays(today, 1) ? 'Tomorrow' : formatDay(d, 'relative'))
+  const events = prefs.upcoming ? [] : upcoming(blocks, 7).slice(0, 3)
   const recents = useRecents(current)
     .filter((id) => blocks[id]?.alive && blocks[id].type === 'page')
     .slice(0, 5)
@@ -110,40 +153,64 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
     <aside className="sidebar" style={{ width }}>
       <div className="side-resizer" onMouseDown={startResize} />
       <div className="ws-header">
-        <button className="ws-switcher" onClick={() => onSettings('account')} title="Your account">
-          <span className="avatar">{initials(name)}</span>
-          <span className="ws-name">{name ? `${name.split(' ')[0]}'s Notion` : 'Notion(RE)'}</span>
+        <button className="ctl ws-ctl ws-logo" title={name ? `${name}'s Notion` : 'Notion(RE)'} onClick={() => onSettings('account')}>
+          <span className="ws-logo-mark">{initials(name)}</span>
+        </button>
+        <button className="ctl ws-ctl" title="Close sidebar (Ctrl+\\)" onClick={onCollapse}>
+          <Icon name="sidebar" size={18} />
         </button>
         <span style={{ flex: 1 }} />
-        <button className="ctl ws-ctl" title="Close sidebar (Ctrl+\\)" onClick={onCollapse}>
-          <Icon name="collapse" size={18} />
+        <button className="ctl ws-ctl ws-inbox" title="Inbox" onClick={onInbox}>
+          <Icon name="inbox" size={18} />
+          {unread > 0 && <span className="ws-dot" />}
         </button>
         <button className="ctl ws-ctl" title="New page (Ctrl+N)" onClick={() => createPage(null)}>
           <Icon name="compose" size={18} />
         </button>
       </div>
       <button className="side-search" onClick={onSearch}>
-        <Icon name="search" size={16} />
-        <span>Search</span>
+        <span>Search or ask</span>
         <kbd>Ctrl+K</kbd>
       </button>
       <nav className="side-actions">
-        <button className={`side-item ${current === HOME_ID ? 'active' : ''}`} onClick={() => useStore.getState().openPage(HOME_ID)}>
+        <button className={`side-item side-home ${current === HOME_ID ? 'active' : ''}`} onClick={() => useStore.getState().openPage(HOME_ID)}>
           <span className="side-ic"><Icon name="home" /></span> Home
         </button>
         <button className="side-item" onClick={onAI}>
-          <span className="side-ic"><Icon name="sparkle" /></span> AI chat
+          <span className="side-ic"><Icon name="chat" /></span> New chat
         </button>
-        <button className="side-item" onClick={onInbox}>
-          <span className="side-ic"><Icon name="inbox" /></span> Inbox
-          {unread > 0 && <span className="side-badge">{unread}</span>}
-        </button>
+        {!prefs.inbox && (
+          <button className="side-item" onClick={onInbox}>
+            <span className="side-ic"><Icon name="inbox" /></span> Inbox
+            {unread > 0 && <span className="side-badge">{unread}</span>}
+          </button>
+        )}
       </nav>
 
       <div className="side-scroll">
-        {recents.length > 0 && (
+        {!prefs.upcoming && (
           <>
-            {section('recent', 'Recent')}
+            {section('upcoming', 'Upcoming events')}
+            {!shut.upcoming && (
+              <div className="tree">
+                {events.length === 0 && <div className="side-empty">No upcoming events</div>}
+                {events.map((e) => (
+                  <button key={e.row.id + e.prop.id} className="side-item side-event" onClick={() => useStore.getState().openPage(e.row.id)}>
+                    <span className="side-cal">{new Date(e.day + 'T00:00').getDate()}</span>
+                    <span className="side-event-text">
+                      <span className="side-event-title">{pageTitle(e.row)}</span>
+                      <span className="side-event-meta">{dayLabel(e.day)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {!prefs.recent && recents.length > 0 && (
+          <>
+            {section('recent', 'Recents')}
             {!shut.recent && (
               <div className="tree tree-favorites">
                 {recents.map((id) => (
@@ -172,9 +239,9 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
           'Private',
           <span className="side-section-actions">
             <button className="ctl" title="New database" onClick={() => useStore.getState().createDatabase({ parent: null })}>
-              ▦
+              <Icon name="template" size={14} />
             </button>
-            <button className="ctl" title="New page" onClick={() => createPage(null)}>
+            <button className="ctl" title="Add a page" onClick={() => createPage(null)}>
               <PlusIcon />
             </button>
           </span>,
@@ -194,32 +261,58 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
       </div>
 
       <div className="side-bottom">
-        <button className="side-item" onClick={() => onSettings()}>
-          <span className="side-ic"><Icon name="gear" /></span> Settings
-        </button>
-        <button className="side-item" onClick={onTemplates}>
+        <button className="side-item muted" onClick={onTemplates}>
           <span className="side-ic"><Icon name="template" /></span> Templates
         </button>
-        <label className="side-item">
-          <span className="side-ic"><Icon name="import" /></span> Import
-          <input
-            type="file"
-            accept=".md,.markdown,.txt"
-            multiple
-            hidden
-            onChange={(e) => {
-              if (e.target.files?.length) importMarkdown(e.target.files)
-              e.target.value = ''
-            }}
-          />
-        </label>
-        <button className="side-item" onClick={onTrash}>
+        <button className="side-item muted" onClick={onTrash}>
           <span className="side-ic"><Icon name="trash" /></span> Trash
         </button>
+        <button className="side-item muted" onClick={() => onSettings('sidebar')}>
+          <span className="side-ic"><Icon name="sliders" /></span> Customize sidebar
+        </button>
+      </div>
+      <div className="side-footer">
+        <button className="side-profile" onClick={() => setProfileMenu(!profileMenu)}>
+          <Avatar className="small" />
+          <span className="side-profile-name">{name || 'Notion(RE)'}</span>
+          <Icon name="down" size={12} />
+        </button>
+        <span style={{ flex: 1 }} />
+        <button className="ctl ws-ctl" title="Settings (Ctrl+,)" onClick={() => onSettings()}>
+          <Icon name="gear" size={18} />
+        </button>
+        <button className="ctl ws-ctl" title="Help & keyboard shortcuts" onClick={onShortcuts}>
+          <Icon name="question" size={18} />
+        </button>
+        {profileMenu && (
+          <ActionMenu
+            className="profile-menu"
+            search={false}
+            onClose={() => setProfileMenu(false)}
+            header={<div className="profile-menu-head">{email || 'On this computer only'}</div>}
+            entries={[
+              { label: name ? `${name}'s Notion` : 'Notion(RE)', icon: <Avatar className="small" />, onClick: () => onSettings('account') },
+              { kind: 'sep' },
+              { label: 'Settings', icon: 'gear', kbd: 'Ctrl+,', onClick: () => onSettings() },
+              { label: 'Import', icon: 'import', onClick: pickImport },
+              { label: 'Keyboard shortcuts', icon: 'keyboard', kbd: 'Ctrl+Alt+/', onClick: onShortcuts },
+            ]}
+          />
+        )}
       </div>
     </aside>
   )
 }
+
+function pickImport() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.md,.markdown,.txt'
+  input.multiple = true
+  input.onchange = () => input.files?.length && importMarkdown(input.files)
+  input.click()
+}
+
 
 function RecentItem({ id }: { id: string }) {
   const page = useStore((s) => s.blocks[id])

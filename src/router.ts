@@ -23,3 +23,23 @@ export function startRouter() {
     if (id && (S.blocks[id] || id === HOME_ID) && id !== S.currentPageId) S.openPage(id)
   })
 }
+
+/** "Copy link to block": the page link plus the block id; opening it scrolls to the block. */
+export const blockUrl = (pageId: string, blockId: string) => `${pageUrl(pageId)}/${blockId}`
+
+const hashBlock = () => location.hash.match(/^#\/[\w-]+\/([\w-]+)/)?.[1] ?? null
+
+/** Scroll to the block named in the link and flash it, like Notion does. */
+export function revealLinkedBlock() {
+  const id = hashBlock()
+  if (!id) return
+  let tries = 0
+  const find = () => {
+    const el = document.querySelector(`[data-block-id="${id}"]`)
+    if (!el) return void (++tries < 20 && setTimeout(find, 100))
+    el.scrollIntoView({ block: 'center' })
+    el.classList.add('block-flash')
+    setTimeout(() => el.classList.remove('block-flash'), 2000)
+  }
+  find()
+}

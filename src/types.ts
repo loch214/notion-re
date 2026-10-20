@@ -72,6 +72,8 @@ export interface Block {
     background?: ColorName
     /** Pages only: Notion's "Small text" switch. */
     small_text?: boolean
+    /** Pages only: hide the floating outline of headings on the right ("Table of contents" in Appearance & layout). */
+    hide_outline?: boolean
     /** Pages only: "Lock page" — no edits until unlocked. */
     locked?: boolean
     /** Database child page that is a template ("New" ▾ menu), not a row. */

@@ -12,6 +12,9 @@ const CACHE_KEY = 'notion-re:server-cache'
 export const START_PAGE_KEY = 'notion-re:start-page'
 /** Pseudo page id for Home (not a block; the URL is #/home). */
 export const HOME_ID = 'home'
+/** Notion's Library (all pages in a table); like Home it's a screen, not a block. */
+export const LIBRARY_ID = 'library'
+export const isScreen = (id: string | null | undefined) => id === HOME_ID || id === LIBRARY_ID
 
 const now = () => Date.now()
 const HEADING_TYPES: BlockType[] = ['header', 'sub_header', 'sub_sub_header', 'header_4']
@@ -356,7 +359,7 @@ export const useStore = create<State>((set, get) => {
     })
     const rootPages = roots.filter((id) => blocks[id])
     const cur = s.currentPageId
-    const currentPageId = cur === HOME_ID || (cur && blocks[cur]) ? cur : (cur && s.blocks[cur]?.parent_id) || rootPages.find((id) => blocks[id]?.alive) || null
+    const currentPageId = isScreen(cur) || (cur && blocks[cur]) ? cur : (cur && s.blocks[cur]?.parent_id) || rootPages.find((id) => blocks[id]?.alive) || null
     set({ blocks, rootPages, currentPageId, historyTick: s.historyTick + 1 })
     persist(get())
     if (rev.focusId && blocks[rev.focusId]?.alive && blocks[rev.focusId].type !== 'page') get().requestFocus({ id: rev.focusId, at: 'end' })
@@ -423,7 +426,7 @@ export const useStore = create<State>((set, get) => {
         seed = !local
       }
       const pick = [linked, localStorage.getItem(START_PAGE_KEY), savedPage, ws.currentPageId, ws.rootPages.find((id) => ws.blocks[id]?.alive)]
-      const currentPageId = pick.find((id) => id && (ws.blocks[id] || id === HOME_ID)) ?? null
+      const currentPageId = pick.find((id) => id && (ws.blocks[id] || isScreen(id))) ?? null
       // Repairs a list that an older version let drift (duplicates, pages moved inside others).
       const rootPages = normalizeRoots(ws.blocks, ws.rootPages)
       if (rootPages.join() !== ws.rootPages.join()) seed = true
@@ -460,7 +463,7 @@ export const useStore = create<State>((set, get) => {
       const rootsChanged = roots.join() !== s.rootPages.join()
       if (!changed && !rootsChanged) return
       syncedRoots = roots
-      const currentPageId = s.currentPageId === HOME_ID || (s.currentPageId && blocks[s.currentPageId]) ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
+      const currentPageId = isScreen(s.currentPageId) || (s.currentPageId && blocks[s.currentPageId]) ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
       // Changes from elsewhere aren't yours to undo — except during a checkpoint (an AI turn).
       const recorded = checkpoint
         ? recordHistory(diffBlocks(s.blocks, blocks), s.rootPages, rootsChanged ? roots : s.rootPages, checkpoint)

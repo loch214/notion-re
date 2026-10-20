@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { markdownToBlocks } from '../markdown'
-import { HOME_ID, pageTitle, useStore } from '../store'
+import { HOME_ID, isScreen, LIBRARY_ID, pageTitle, useStore } from '../store'
 import { Icon, PlusIcon, TriangleIcon } from './Icons'
 import { Avatar, initials, useProfile } from '../profile'
 import { addDays, formatDay, todayIso } from '../../shared/dates'
@@ -60,6 +60,16 @@ export function useSidebarPrefs() {
   return getSidebarPrefs()
 }
 
+const VISITED_KEY = 'notion-re:visited'
+/** When each page was last opened (Library's "Last visited time"). */
+export function readVisited(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(VISITED_KEY) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
 /** Recently opened page ids, newest first (also used by Home). */
 export function readRecents(): string[] {
   try {
@@ -72,7 +82,8 @@ export function readRecents(): string[] {
 function useRecents(current: string | null) {
   const [ids, setIds] = useState<string[]>(readRecents)
   useEffect(() => {
-    if (!current || current === HOME_ID) return
+    if (!current || isScreen(current)) return
+    localStorage.setItem(VISITED_KEY, JSON.stringify({ ...readVisited(), [current]: Date.now() }))
     setIds((old) => {
       const next = [current, ...old.filter((i) => i !== current)].slice(0, 12)
       localStorage.setItem(RECENT_KEY, JSON.stringify(next))
@@ -182,6 +193,9 @@ export function Sidebar({ onSearch, onSettings, onTrash, onAI, onInbox, onTempla
         </button>
         <button className="side-item" onClick={onAI}>
           <span className="side-ic"><Icon name="chat" /></span> New chat
+        </button>
+        <button className={`side-item ${current === LIBRARY_ID ? 'active' : ''}`} onClick={() => useStore.getState().openPage(LIBRARY_ID)}>
+          <span className="side-ic"><Icon name="library" /></span> Library
         </button>
         {!prefs.inbox && (
           <button className="side-item" onClick={onInbox}>

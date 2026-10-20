@@ -11,7 +11,8 @@ import { Sidebar } from './components/Sidebar'
 import { FindBar } from './components/Find'
 import { Icon } from './components/Icons'
 import { FormatToolbar } from './components/FormatToolbar'
-import { HOME_ID, pagePath, pageTitle, useStore } from './store'
+import { HOME_ID, LIBRARY_ID, pagePath, pageTitle, useStore } from './store'
+import { Library } from './components/Library'
 import { Home } from './components/Home'
 import { InboxPanel } from './components/Inbox'
 import { TemplatesModal } from './components/Templates'
@@ -150,7 +151,7 @@ export default function App() {
 
   const page = currentPageId ? blocks[currentPageId] : undefined
   useEffect(() => {
-    document.title = page ? `${pageTitle(page)} · Notion(RE)` : currentPageId === HOME_ID ? 'Home · Notion(RE)' : 'Notion(RE)'
+    document.title = page ? `${pageTitle(page)} · Notion(RE)` : currentPageId === HOME_ID ? 'Home · Notion(RE)' : currentPageId === LIBRARY_ID ? 'Library · Notion(RE)' : 'Notion(RE)'
   }, [page?.properties.title, currentPageId])
 
   if (!loaded) return <div className="loading">Loading…</div>
@@ -196,6 +197,11 @@ export default function App() {
                 <span className="crumb"><Icon name="home" size={16} /> Home</span>
               </span>
             )}
+            {currentPageId === LIBRARY_ID && (
+              <span className="crumb-wrap">
+                <span className="crumb"><Icon name="library" size={16} /> Library</span>
+              </span>
+            )}
             {path.map((p, i) => (
               <span key={p.id} className="crumb-wrap">
                 {i > 0 && <span className="crumb-sep">/</span>}
@@ -232,6 +238,8 @@ export default function App() {
         <div className="scroll">
           {currentPageId === HOME_ID ? (
             <Home />
+          ) : currentPageId === LIBRARY_ID ? (
+            <Library />
           ) : page ? (
             <PageView key={page.id} pageId={page.id} />
           ) : (

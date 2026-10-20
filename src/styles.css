@@ -1373,3 +1373,20 @@ button.row-prop-name:hover { background: var(--bg-hover); }
 .vs-layouts button.on { border: 2px solid var(--accent); color: var(--accent); }
 .tree-actions.on { display: flex; }
 .tree-rename { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--accent); background: var(--bg); color: var(--text); font: inherit; font-size: 14px; outline: none; }
+
+/* ---- Library (Notion's all-pages table) ---- */
+.library { max-width: 1100px; margin: 0 auto; padding: 56px 96px 120px; }
+.library-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.library-head h1 { font-size: 32px; font-weight: 700; margin: 0; color: var(--text); }
+.library-tabs { margin-left: 0; }
+.library-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.library-table th { text-align: left; font-weight: 400; color: var(--muted); height: 34px; padding: 0 8px; border-bottom: 1px solid var(--divider, var(--border)); white-space: nowrap; }
+.library-table th svg { vertical-align: -2px; margin-right: 4px; }
+.library-table td { height: 34px; padding: 0 8px; border-bottom: 1px solid var(--divider, var(--border)); color: var(--muted); white-space: nowrap; }
+.library-table tr:hover td { background: var(--bg-hover); }
+.library-table tbody tr { cursor: pointer; }
+td.library-name { color: var(--text); font-weight: 500; display: flex; align-items: center; gap: 8px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.library-icon { width: 20px; display: grid; place-items: center; flex: none; color: var(--muted); }
+td.library-src { color: var(--text); }
+td.library-src svg { vertical-align: -2px; color: var(--muted); }
+.library-empty { padding: 32px 8px; color: var(--muted); font-size: 14px; }

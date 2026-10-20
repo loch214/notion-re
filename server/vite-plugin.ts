@@ -32,7 +32,7 @@ function crossOrigin(req: IncomingMessage) {
 }
 
 function setup(root: string, middlewares: Connect.Server) {
-  const file = path.resolve(root, 'data', 'workspace.json')
+  const file = process.env.NOTION_RE_DATA ?? path.resolve(root, 'data', 'workspace.json')
   fs.mkdirSync(path.dirname(file), { recursive: true })
 
   const clients = new Set<ServerResponse>()

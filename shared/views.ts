@@ -3,6 +3,7 @@
 
 import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator, PropertyType, ViewType } from '../src/types'
 import { cellRaw, cellText, dbRows, isSingleChoice, shortId } from './blocks.ts'
+import { endDay, resolveDay, startDay, withinRange } from './dates.ts'
 
 export const VIEW_TYPES: { type: ViewType; label: string; icon: string }[] = [
   { type: 'table', label: 'Table', icon: '▦' },
@@ -10,6 +11,7 @@ export const VIEW_TYPES: { type: ViewType; label: string; icon: string }[] = [
   { type: 'list', label: 'List', icon: '☰' },
   { type: 'gallery', label: 'Gallery', icon: '▩' },
   { type: 'calendar', label: 'Calendar', icon: '📅' },
+  { type: 'timeline', label: 'Timeline', icon: '▤' },
 ]
 
 export function newView(type: ViewType, schema: DbProperty[], name?: string): DbView {
@@ -22,6 +24,7 @@ export function newView(type: ViewType, schema: DbProperty[], name?: string): Db
   }
   if (type === 'board') view.group_by = schema.find((p) => isSingleChoice(p.type))?.id
   if (type === 'calendar') view.calendar_by = schema.find((p) => p.type === 'date')?.id
+  if (type === 'timeline') view.timeline_by = schema.find((p) => p.type === 'date')?.id
   if (type === 'gallery') view.cover = 'page_content'
   return view
 }
@@ -69,8 +72,11 @@ export const OPERATORS: Record<PropertyType, { op: FilterOperator; label: string
   checkbox: [{ op: 'checkbox_is', label: 'is' }],
   date: [
     { op: 'date_is', label: 'is' },
+    { op: 'date_is_before', label: 'is before' },
+    { op: 'date_is_after', label: 'is after' },
     { op: 'date_is_on_or_before', label: 'is on or before' },
     { op: 'date_is_on_or_after', label: 'is on or after' },
+    { op: 'date_is_within', label: 'is within' },
     { op: 'is_empty', label: 'is empty' },
     { op: 'is_not_empty', label: 'is not empty' },
   ],
@@ -112,9 +118,28 @@ export function matchFilter(schema: DbProperty[], row: Block, f: DbFilter): bool
     case 'enum_contains': return Array.isArray(v) && v.includes(String(want))
     case 'enum_does_not_contain': return !Array.isArray(v) || !v.includes(String(want))
     case 'checkbox_is': return !!v === !!want
-    case 'date_is': return v === want
-    case 'date_is_on_or_before': return typeof v === 'string' && !!want && v <= String(want)
-    case 'date_is_on_or_after': return typeof v === 'string' && !!want && v >= String(want)
+    case 'date_is':
+    case 'date_is_before':
+    case 'date_is_after':
+    case 'date_is_on_or_before':
+    case 'date_is_on_or_after': {
+      // Ranges match by overlap, like Notion: "is" = the day falls inside the range.
+      const day = resolveDay(want)
+      const a = startDay(v)
+      const b = endDay(v)
+      if (!day || !a || !b) return false
+      if (f.operator === 'date_is') return a <= day && day <= b
+      if (f.operator === 'date_is_before') return a < day
+      if (f.operator === 'date_is_after') return b > day
+      if (f.operator === 'date_is_on_or_before') return a <= day
+      return b >= day
+    }
+    case 'date_is_within': {
+      const r = withinRange(String(want))
+      const a = startDay(v)
+      const b = endDay(v)
+      return !!r && !!a && !!b && a <= r[1] && b >= r[0]
+    }
     default: return true
   }
 }
@@ -167,7 +192,8 @@ export function prefillFor(view: DbView): Record<string, CellValue> {
   const cells: Record<string, CellValue> = {}
   if (view.filter.operator !== 'and') return cells
   for (const f of view.filter.filters) {
-    if (f.operator === 'enum_is' || f.operator === 'checkbox_is' || f.operator === 'date_is') cells[f.property] = f.value ?? null
+    if (f.operator === 'enum_is' || f.operator === 'checkbox_is') cells[f.property] = f.value ?? null
+    if (f.operator === 'date_is') cells[f.property] = resolveDay(f.value)
     if (f.operator === 'enum_contains' && f.value) cells[f.property] = [String(f.value)]
   }
   return cells
@@ -205,8 +231,10 @@ export function describeView(db: Block, view: DbView): string {
   const parts = [`${view.name} (${view.type})`]
   if (view.group_by) parts.push(`grouped by ${name(view.group_by)}`)
   if (view.calendar_by) parts.push(`by date ${name(view.calendar_by)}`)
+  if (view.timeline_by) parts.push(`timeline by ${name(view.timeline_by)}`)
   if (view.filter.filters.length) parts.push(`filter: ${view.filter.filters.map(label).join(view.filter.operator === 'or' ? ' OR ' : ' AND ')}`)
   if (view.sort.length) parts.push(`sort: ${view.sort.map((s) => `${name(s.property)} ${s.direction}`).join(', ')}`)
   if (view.hidden?.length) parts.push(`hidden: ${view.hidden.map(name).join(', ')}`)
+  if (view.calcs && Object.keys(view.calcs).length) parts.push(`calculate: ${Object.entries(view.calcs).map(([id, fn]) => `${name(id)} ${fn}`).join(', ')}`)
   return parts.join(' · ')
 }

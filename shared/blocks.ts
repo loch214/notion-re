@@ -2,6 +2,7 @@
 // No DOM APIs in here.
 
 import type { Block, BlockColor, BlockType, CellValue, ColorName, DbProperty, OptionColor, PropertyType, SelectOption } from '../src/types'
+import { formatNumber } from './calc.ts'
 
 export interface Workspace {
   blocks: Record<string, Block>
@@ -160,6 +161,7 @@ export function cellText(prop: DbProperty, row: Block): string {
   const optName = (id: string) => prop.options?.find((o) => o.id === id)?.name ?? ''
   switch (prop.type) {
     case 'checkbox': return v ? 'Yes' : 'No'
+    case 'number': return typeof v === 'number' ? formatNumber(v, prop) : String(v)
     case 'select':
     case 'status': return optName(String(v))
     case 'multi_select': return (Array.isArray(v) ? v : []).map(optName).filter(Boolean).join(', ')
@@ -169,7 +171,12 @@ export function cellText(prop: DbProperty, row: Block): string {
 
 /** Live rows of a database, in order. */
 export function dbRows(blocks: Record<string, Block>, db: Block): Block[] {
-  return db.content.map((id) => blocks[id]).filter((b) => b?.alive && b.type === 'page')
+  return db.content.map((id) => blocks[id]).filter((b) => b?.alive && b.type === 'page' && !b.format.template)
+}
+
+/** A database's templates (child pages flagged as templates), in order. */
+export function dbTemplates(blocks: Record<string, Block>, db: Block): Block[] {
+  return db.content.map((id) => blocks[id]).filter((b) => b?.alive && b.type === 'page' && !!b.format.template)
 }
 
 function databaseToMarkdown(blocks: Record<string, Block>, db: Block, withIds: boolean): string[] {
@@ -178,7 +185,9 @@ function databaseToMarkdown(blocks: Record<string, Block>, db: Block, withIds: b
   const head = [...(withIds ? ['row id'] : []), ...schema.map((p) => `${p.name} (${p.type})`)]
   const lines = [`| ${head.map(esc).join(' | ')} |`, `|${head.map(() => ' --- |').join('')}`]
   for (const row of dbRows(blocks, db)) {
-    const cells = [...(withIds ? [row.id] : []), ...schema.map((p) => cellText(p, row))]
+    const parent = row.properties.parent_row ? blocks[row.properties.parent_row] : undefined
+    const sub = parent?.alive ? ` (sub-item of ${parent.properties.title || 'Untitled'})` : ''
+    const cells = [...(withIds ? [row.id] : []), ...schema.map((p) => cellText(p, row) + (p.type === 'title' ? sub : ''))]
     lines.push(`| ${cells.map(esc).join(' | ')} |`)
   }
   return lines

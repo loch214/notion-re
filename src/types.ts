@@ -51,6 +51,10 @@ export interface Block {
     row?: string[]
     /** bookmark: preview fetched for the link. */
     bookmark?: { title?: string; description?: string; icon?: string; image?: string }
+    /** Database rows: reminders per date property, in minutes before the start (see shared/dates.ts). */
+    reminders?: Record<string, number>
+    /** Database rows: the row this one is a sub-item of (Notion's "Sub-items"). */
+    parent_row?: string
   }
   format: {
     icon?: string
@@ -70,6 +74,10 @@ export interface Block {
     small_text?: boolean
     /** Pages only: "Lock page" — no edits until unlocked. */
     locked?: boolean
+    /** Database child page that is a template ("New" ▾ menu), not a row. */
+    template?: boolean
+    /** Database only: the template new rows start from. */
+    default_template?: string
     /** Pages only: shown in the sidebar's Favorites section. */
     favorite?: boolean
     /** Headings only: a toggle heading (children hide when collapsed). */
@@ -124,9 +132,25 @@ export interface DbProperty {
   /** select / multi_select only. */
   options?: SelectOption[]
   width?: number
+  /** date only: how values are shown (Notion's "Date format" / "Time format"). */
+  date_format?: 'full' | 'short' | 'mdy' | 'dmy' | 'ymd' | 'relative'
+  time_format?: '12' | '24'
+  /** number only: how values are shown (shared/calc.ts NUMBER_FORMATS). */
+  number_format?: NumberFormat
 }
 
-export type ViewType = 'table' | 'board' | 'list' | 'gallery' | 'calendar'
+export type NumberFormat =
+  | 'number' | 'number_with_commas' | 'percent' | 'dollar' | 'canadian_dollar' | 'australian_dollar'
+  | 'euro' | 'pound' | 'yen' | 'yuan' | 'won' | 'rupee' | 'sri_lankan_rupee' | 'franc'
+
+/** Calculate row functions (Notion's column aggregations). */
+export type CalcFn =
+  | 'count_all' | 'count_values' | 'count_unique' | 'count_empty' | 'count_not_empty' | 'percent_empty' | 'percent_not_empty'
+  | 'sum' | 'average' | 'median' | 'min' | 'max' | 'range'
+  | 'earliest_date' | 'latest_date' | 'date_range'
+  | 'checked' | 'unchecked' | 'percent_checked' | 'percent_unchecked'
+
+export type ViewType = 'table' | 'board' | 'list' | 'gallery' | 'calendar' | 'timeline'
 
 export type FilterOperator =
   | 'string_is'
@@ -145,6 +169,9 @@ export type FilterOperator =
   | 'date_is'
   | 'date_is_on_or_before'
   | 'date_is_on_or_after'
+  | 'date_is_before'
+  | 'date_is_after'
+  | 'date_is_within'
   | 'is_empty'
   | 'is_not_empty'
 
@@ -167,16 +194,26 @@ export interface DbView {
   filter: { operator: 'and' | 'or'; filters: DbFilter[] }
   /** Property ids hidden in this view (the title is always shown). */
   hidden?: string[]
+  /** Table: Calculate row, property id → function. */
+  calcs?: Record<string, CalcFn>
   /** Board: the select property whose options become columns. */
   group_by?: string
   /** Calendar: the date property that places rows on days. */
   calendar_by?: string
+  /** Calendar: month (default) or week. */
+  calendar_range?: 'month' | 'week'
+  /** Timeline: the date property that places bars, and the zoom level. */
+  timeline_by?: string
+  timeline_zoom?: 'week' | 'month' | 'quarter'
+  /** How rows open: side peek (default) or full page. */
+  open_in?: 'side_peek' | 'full_page'
   /** Gallery: what the top of each card shows. */
   cover?: 'none' | 'page_cover' | 'page_content'
 }
 
 /**
- * text/url: string · number: number · checkbox: boolean · date: 'YYYY-MM-DD'
+ * text/url: string · number: number · checkbox: boolean
+ * date: 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:mm', optionally '/' + an end in the same form
  * select: option id · multi_select: option ids
  */
 export type CellValue = string | number | boolean | string[] | null
@@ -188,4 +225,8 @@ export interface AISettings {
   apiKeys: Partial<Record<AIProvider, string>>
   models: Partial<Record<AIProvider, string>>
   baseUrl: string
+  /** Lets the Claude agent read files on this computer: off, ask each time, or automatic. */
+  fileAccess?: 'off' | 'ask' | 'auto'
+  /** Folders it may read, one per line (empty = home folder and other drives). */
+  folders?: string
 }

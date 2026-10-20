@@ -67,6 +67,14 @@ export function PageView({ pageId }: { pageId: string }) {
 
   return (
     <div className={`page ${f.background ? `bg-${f.background}` : ''} ${f.page_font && f.page_font !== 'default' ? `font-${f.page_font}` : ''} ${f.small_text ? 'small-text' : ''} ${locked ? 'locked' : ''}`}>
+      {f.template && page.parent_id && (
+        <div className="template-banner">
+          You’re editing a template in
+          <button onClick={() => S().openPage(page.parent_id!)}>{S().blocks[page.parent_id]?.format.icon} {pageTitle(S().blocks[page.parent_id])}</button>
+          <span style={{ flex: 1 }} />
+          <button className="btn small" onClick={() => S().openPage(page.parent_id!)}>Back</button>
+        </div>
+      )}
       {cover && (
         <div className="cover" style={{ background: cover }}>
           <div className="cover-actions" hidden={locked}>

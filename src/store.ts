@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { defaultSchema, duplicateTree, htmlToPlain as htmlToPlainText, makeBlock, normalizeRoots, type Workspace } from '../shared/blocks.ts'
+import { addDbTemplate, buildTemplate, findTemplate, rowFromTemplate } from '../shared/templates.ts'
 import type { AISettings, Block, BlockType, CellValue } from './types'
 
 const DB_KEY = 'notion-re:workspace'
@@ -9,6 +10,8 @@ const SETTINGS_KEY = 'notion-re:ai-settings'
 const CACHE_KEY = 'notion-re:server-cache'
 /** Settings → Open on start: a page id, or empty for the last visited page. */
 export const START_PAGE_KEY = 'notion-re:start-page'
+/** Pseudo page id for Home (not a block; the URL is #/home). */
+export const HOME_ID = 'home'
 
 const now = () => Date.now()
 const HEADING_TYPES: BlockType[] = ['header', 'sub_header', 'sub_sub_header', 'header_4']
@@ -63,6 +66,12 @@ interface State {
   /** New full-page database, at the top level or inside `parent` (after block `after`). Opens it. */
   createDatabase: (opts: { parent: string | null; after?: string; inline?: boolean }) => string
   addRow: (dbId: string, title?: string, cells?: Record<string, CellValue>) => string
+  /** New row from a template (`undefined` = the database's default template, `null` = empty page). */
+  newDbRow: (dbId: string, templateId?: string | null, cells?: Record<string, CellValue>) => string
+  /** Add an empty database template and return its id. */
+  addDbTemplate: (dbId: string) => string
+  /** Make a page (or database) from the Templates gallery and open it. */
+  addFromTemplate: (key: string, parentId: string | null) => string
   setCell: (rowId: string, propId: string, value: CellValue) => void
   /** Copy a block or page (with everything inside it) right after the original. */
   duplicate: (id: string) => string
@@ -202,6 +211,7 @@ const defaultSettings: AISettings = {
   apiKeys: {},
   models: {},
   baseUrl: '',
+  fileAccess: 'ask',
 }
 
 function welcomeWorkspace() {
@@ -344,7 +354,7 @@ export const useStore = create<State>((set, get) => {
     })
     const rootPages = roots.filter((id) => blocks[id])
     const cur = s.currentPageId
-    const currentPageId = cur && blocks[cur] ? cur : (cur && s.blocks[cur]?.parent_id) || rootPages.find((id) => blocks[id]?.alive) || null
+    const currentPageId = cur === HOME_ID || (cur && blocks[cur]) ? cur : (cur && s.blocks[cur]?.parent_id) || rootPages.find((id) => blocks[id]?.alive) || null
     set({ blocks, rootPages, currentPageId, historyTick: s.historyTick + 1 })
     persist(get())
     if (rev.focusId && blocks[rev.focusId]?.alive && blocks[rev.focusId].type !== 'page') get().requestFocus({ id: rev.focusId, at: 'end' })
@@ -411,7 +421,7 @@ export const useStore = create<State>((set, get) => {
         seed = !local
       }
       const pick = [linked, localStorage.getItem(START_PAGE_KEY), savedPage, ws.currentPageId, ws.rootPages.find((id) => ws.blocks[id]?.alive)]
-      const currentPageId = pick.find((id) => id && ws.blocks[id]) ?? null
+      const currentPageId = pick.find((id) => id && (ws.blocks[id] || id === HOME_ID)) ?? null
       // Repairs a list that an older version let drift (duplicates, pages moved inside others).
       const rootPages = normalizeRoots(ws.blocks, ws.rootPages)
       if (rootPages.join() !== ws.rootPages.join()) seed = true
@@ -448,7 +458,7 @@ export const useStore = create<State>((set, get) => {
       const rootsChanged = roots.join() !== s.rootPages.join()
       if (!changed && !rootsChanged) return
       syncedRoots = roots
-      const currentPageId = s.currentPageId && blocks[s.currentPageId] ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
+      const currentPageId = s.currentPageId === HOME_ID || (s.currentPageId && blocks[s.currentPageId]) ? s.currentPageId : roots.find((id) => blocks[id].alive) ?? null
       // Changes from elsewhere aren't yours to undo — except during a checkpoint (an AI turn).
       const recorded = checkpoint
         ? recordHistory(diffBlocks(s.blocks, blocks), s.rootPages, rootsChanged ? roots : s.rootPages, checkpoint)
@@ -496,6 +506,34 @@ export const useStore = create<State>((set, get) => {
         return inline ? {} : { currentPageId: db.id }
       })
       return db.id
+    },
+
+    newDbRow: (dbId, templateId, cells) => {
+      let id = ''
+      mutate((blocks) => {
+        const t = templateId === undefined ? blocks[dbId].format.default_template ?? null : templateId
+        id = rowFromTemplate(blocks, dbId, t && blocks[t]?.alive ? t : null, cells)
+      })
+      return id
+    },
+
+    addDbTemplate: (dbId) => {
+      let id = ''
+      mutate((blocks) => {
+        id = addDbTemplate(blocks, dbId)
+      })
+      return id
+    },
+
+    addFromTemplate: (key, parentId) => {
+      const tpl = findTemplate(key)
+      if (!tpl) return ''
+      let id = ''
+      mutate((blocks, s) => {
+        id = buildTemplate(blocks, tpl, parentId)
+        return parentId ? { currentPageId: id } : { rootPages: [...s.rootPages, id], currentPageId: id }
+      })
+      return id
     },
 
     addRow: (dbId, title = '', cells) => {

@@ -3,7 +3,14 @@
 // values live in `properties.cells[propertyId]`.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DateCell } from './DatePicker'
+import { openRow } from './Peek'
+import { PlusIcon, TriangleIcon } from './Icons'
+import { askNotificationPermission } from '../reminders'
 import { cellRaw, dbRows, isSingleChoice, OPTION_COLORS, PROPERTY_TYPES, shortId, statusOptions } from '../../shared/blocks.ts'
+import { isDateValue } from '../../shared/dates.ts'
+import { calcLabel, calcOptions, calculate, formatNumber, NUMBER_FORMATS, parseNumber } from '../../shared/calc.ts'
+import { getViews } from '../../shared/views.ts'
 import { useStore } from '../store'
 import type { Block, CellValue, DbProperty, DbView, PropertyType, SelectOption } from '../types'
 
@@ -15,19 +22,22 @@ export const TYPE_ICON: Record<PropertyType, string> = {
 const defaultWidth = (p: DbProperty) => p.width ?? (p.type === 'title' ? 260 : p.type === 'checkbox' ? 90 : 180)
 
 /** Floating panel under an anchor element, closed by clicking outside or Escape. */
-export function Popover({ anchor, onClose, children, width = 240 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
+export function Popover({ anchor, onClose, children, width = 240, height }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number; height?: number }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   const left = Math.min(anchor.left, window.innerWidth - width - 12)
-  const below = window.innerHeight - anchor.bottom > 300
-  const style = below ? { top: anchor.bottom + 4, left, width } : { bottom: window.innerHeight - anchor.top + 4, left, width }
+  // A tall popover (date picker) goes wherever it fits, else as low as it can without leaving the window.
+  const need = height ?? 300
+  const below = window.innerHeight - anchor.bottom > need
+  const above = anchor.top > need
+  const style = below || (!height && !above) ? { top: anchor.bottom + 4, left, width } : above ? { bottom: window.innerHeight - anchor.top + 4, left, width } : { top: Math.max(8, window.innerHeight - need - 8), left, width }
   return (
     <>
       <div className="backdrop" onClick={onClose} />
-      <div className="popover db-popover" style={style}>
+      <div className={`popover db-popover ${height ? 'tall' : ''}`} style={style}>
         {children}
       </div>
     </>
@@ -38,10 +48,35 @@ export function Popover({ anchor, onClose, children, width = 240 }: { anchor: DO
 export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block[]; view: DbView; onNewRow: () => void }) {
   const dbId = db.id
   const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
+  const [calc, setCalc] = useState<{ propId: string; rect: DOMRect } | null>(null)
   const [dropRow, setDropRow] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const S = useStore.getState
   const allColumns = db.schema!
   const schema = allColumns.filter((p) => p.type === 'title' || !view.hidden?.includes(p.id))
+
+  // Sub-items: children follow their parent row, indented, behind a toggle (Notion's nested sub-items).
+  const [shut, setShut] = useState<Record<string, boolean>>({})
+  const ids = new Set(rows.map((r) => r.id))
+  const kids = new Map<string, Block[]>()
+  for (const r of rows) {
+    const p = r.properties.parent_row
+    if (p && ids.has(p)) kids.set(p, [...(kids.get(p) ?? []), r])
+  }
+  const flat: { row: Block; depth: number }[] = []
+  const walk = (r: Block, depth: number) => {
+    flat.push({ row: r, depth })
+    if (!shut[r.id] && depth < 8) for (const k of kids.get(r.id) ?? []) walk(k, depth + 1)
+  }
+  rows.filter((r) => !r.properties.parent_row || !ids.has(r.properties.parent_row)).forEach((r) => walk(r, 0))
+  const addSub = (parent: string) => {
+    let id = ''
+    S().transact(() => {
+      id = S().newDbRow(dbId, undefined)
+      S().updateBlock(id, { properties: { parent_row: parent } })
+    })
+    setShut({ ...shut, [parent]: false })
+    return id
+  }
 
   const addProperty = (rect: DOMRect) => {
     const prop: DbProperty = { id: shortId(), name: `Property ${allColumns.length}`, type: 'text' }
@@ -100,7 +135,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {flat.map(({ row, depth }) => (
               <tr
                 key={row.id}
                 className={dropRow?.id === row.id ? `drop-${dropRow.pos}` : ''}
@@ -133,36 +168,104 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
                 </td>
                 {schema.map((p) => (
                   <td key={p.id} className={`db-td db-td-${p.type}`}>
-                    {p.type === 'title' ? <TitleCell row={row} /> : <Cell prop={p} row={row} dbId={dbId} />}
+                    {p.type === 'title' ? (
+                      <TitleCell
+                        row={row}
+                        view={view}
+                        depth={depth}
+                        hasKids={kids.has(row.id)}
+                        open={!shut[row.id]}
+                        onToggle={() => setShut({ ...shut, [row.id]: !shut[row.id] })}
+                        onAddSub={() => addSub(row.id)}
+                      />
+                    ) : <Cell prop={p} row={row} dbId={dbId} />}
                   </td>
                 ))}
                 <td />
               </tr>
             ))}
           </tbody>
+          <tfoot>
+            <tr className="db-new-tr">
+              <td className="db-gutter" />
+              <td colSpan={schema.length + 1}>
+                <button className="db-new-row" onClick={onNewRow}>
+                  ＋ New
+                </button>
+              </td>
+            </tr>
+            <tr className="db-calc-row">
+              <td className="db-gutter" />
+              {schema.map((p) => {
+                const fn = view.calcs?.[p.id]
+                const label = fn && calcLabel(p, fn)
+                return (
+                  <td key={p.id}>
+                    <button className={`db-calc ${label ? 'set' : ''}`} onClick={(e) => setCalc({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })}>
+                      {label ? (
+                        <>
+                          <span className="db-calc-label">{label.short}</span> {calculate(fn!, p, rows)}
+                        </>
+                      ) : (
+                        <>Calculate <TriangleIcon size={8} /></>
+                      )}
+                    </button>
+                  </td>
+                )
+              })}
+              <td />
+            </tr>
+          </tfoot>
         </table>
       </div>
-      <button className="db-new-row" onClick={onNewRow}>
-        ＋ New
-      </button>
       {menu && allColumns.some((p) => p.id === menu.propId) && (
         <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />
+      )}
+      {calc && allColumns.some((p) => p.id === calc.propId) && (
+        <Popover anchor={calc.rect} onClose={() => setCalc(null)} width={220}>
+          {[{ value: undefined, label: 'None' }, ...calcOptions(allColumns.find((p) => p.id === calc.propId)!)].map((o) => (
+            <div
+              key={o.value ?? 'none'}
+              className={`menu-item compact ${view.calcs?.[calc.propId] === o.value ? 'active' : ''}`}
+              onClick={() => {
+                const calcs = { ...view.calcs }
+                if (o.value) calcs[calc.propId] = o.value
+                else delete calcs[calc.propId]
+                S().updateBlock(dbId, { views: getViews(db).map((v) => (v.id === view.id ? { ...v, calcs } : v)) })
+                setCalc(null)
+              }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </Popover>
       )}
     </>
   )
 }
 
-function TitleCell({ row }: { row: Block }) {
+function TitleCell({ row, view, depth, hasKids, open, onToggle, onAddSub }: {
+  row: Block
+  view: DbView
+  depth: number
+  hasKids: boolean
+  open: boolean
+  onToggle: () => void
+  onAddSub: () => void
+}) {
   const S = useStore.getState
   return (
-    <div className="db-title-cell">
+    <div className="db-title-cell" style={{ paddingLeft: 6 + depth * 20 }}>
+      <button className={`ctl db-sub-toggle ${hasKids ? 'has' : ''} ${open ? 'open' : ''}`} title={hasKids ? (open ? 'Hide sub-items' : 'Show sub-items') : 'Add a sub-item'} onClick={hasKids ? onToggle : onAddSub}>
+        {hasKids ? <TriangleIcon size={10} /> : <PlusIcon size={10} />}
+      </button>
       <span className="db-row-icon">{row.format.icon ?? '📄'}</span>
       <TextInput
         value={row.properties.title}
         placeholder="Untitled"
         onCommit={(v) => S().updateBlock(row.id, { properties: { title: v } })}
       />
-      <button className="btn small db-open" onClick={() => S().openPage(row.id)}>
+      <button className="btn small db-open" onClick={() => openRow(row.id, view)}>
         Open
       </button>
     </div>
@@ -178,28 +281,36 @@ function TextInput({
   onCommit,
   placeholder,
   type = 'text',
+  display,
 }: {
   value: string
   onCommit: (v: string) => void
   placeholder?: string
   type?: string
+  /** Shown instead of the raw value while not editing (formatted numbers). */
+  display?: string
 }) {
   const [draft, setDraft] = useState(value)
+  const [focused, setFocused] = useState(false)
   const editing = useRef(false)
   useEffect(() => {
     if (!editing.current) setDraft(value)
   }, [value])
   const commit = () => {
     editing.current = false
+    setFocused(false)
     if (draft !== value) onCommit(draft)
   }
   return (
     <input
       className="db-input"
       type={type}
-      value={draft}
+      value={focused || display === undefined ? draft : display}
       placeholder={placeholder}
-      onFocus={() => (editing.current = true)}
+      onFocus={() => {
+        editing.current = true
+        setFocused(true)
+      }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
@@ -235,15 +346,32 @@ export function Cell({ prop, row, dbId }: { prop: DbProperty; row: Block; dbId: 
       return (
         <TextInput
           value={typeof value === 'number' ? String(value) : ''}
+          display={typeof value === 'number' ? formatNumber(value, prop) : ''}
           placeholder="Empty"
-          onCommit={(v) => {
-            const n = parseFloat(v.replace(/,/g, ''))
-            set(v.trim() === '' || Number.isNaN(n) ? null : n)
+          onCommit={(v) => set(parseNumber(v, prop))}
+        />
+      )
+    case 'date': {
+      const reminders = row.properties.reminders ?? {}
+      return (
+        <DateCell
+          value={typeof value === 'string' ? value : null}
+          onChange={(v) => set(v)}
+          prop={prop}
+          onFormat={(patch) => updateProperty(dbId, prop.id, patch)}
+          remind={reminders[prop.id]}
+          onRemind={(m) => {
+            const next = { ...reminders }
+            if (m === undefined) delete next[prop.id]
+            else {
+              next[prop.id] = m
+              askNotificationPermission()
+            }
+            S().updateBlock(row.id, { properties: { reminders: next } })
           }}
         />
       )
-    case 'date':
-      return <input className="db-input" type="date" value={typeof value === 'string' ? value : ''} onChange={(e) => set(e.target.value || null)} />
+    }
     case 'url':
       return (
         <div className="db-url">
@@ -450,6 +578,20 @@ function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: stri
           ))}
         </>
       )}
+      {prop.type === 'number' && (
+        <>
+          <div className="menu-section">Number format</div>
+          <select
+            className="db-number-format"
+            value={prop.number_format ?? 'number'}
+            onChange={(e) => updateProperty(db.id, propId, { number_format: e.target.value === 'number' ? undefined : (e.target.value as DbProperty['number_format']) })}
+          >
+            {NUMBER_FORMATS.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+        </>
+      )}
       {(isSingleChoice(prop.type) || prop.type === 'multi_select') && !!prop.options?.length && (
         <>
           <div className="menu-section">Options (rename, or click the dot to change colour)</div>
@@ -506,7 +648,11 @@ function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: stri
 export function RowProperties({ rowId }: { rowId: string }) {
   const row = useStore((s) => s.blocks[rowId])
   const db = useStore((s) => (row?.parent_id ? s.blocks[row.parent_id] : undefined))
+  const blocks = useStore((s) => s.blocks)
   if (!row || !db?.schema) return null
+  const parentId = row.properties.parent_row
+  const parent = parentId && blocks[parentId]?.alive ? blocks[parentId] : undefined
+  const subs = dbRows(blocks, db).filter((r) => r.properties.parent_row === row.id)
   return (
     <div className="row-props">
       {db.schema
@@ -521,6 +667,18 @@ export function RowProperties({ rowId }: { rowId: string }) {
             </div>
           </div>
         ))}
+      {(parent || subs.length > 0) && (
+        <div className="row-prop">
+          <span className="row-prop-name"><span className="db-type-icon">↳</span> {parent ? 'Parent item' : 'Sub-items'}</span>
+          <div className="row-prop-value row-prop-links">
+            {(parent ? [parent] : subs).map((r) => (
+              <button key={r.id} className="row-prop-link" onClick={() => useStore.getState().openPage(r.id)}>
+                {r.format.icon ?? '📄'} {r.properties.title || 'Untitled'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { activeModel, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage } from '../ai'
+import { activeModel, answerPermission, claudeChat, isConfigured, PROVIDERS, streamChat, type ChatMessage, type PermissionRequest } from '../ai'
 import { markdownToBlocks, pageToMarkdown } from '../markdown'
 import { hasNamedStep, pageTitle, useStore } from '../store'
 import { Icon, type IconName } from './Icons'
@@ -10,6 +10,10 @@ const AGENT_QUICK: [IconName, string][] = [['list', 'Summarize this page'], ['tr
 
 type PanelMessage = ChatMessage & {
   tools?: string[]
+  /** File accesses Claude asked to make ("Ask every time"), with the user's answer. */
+  asks?: (PermissionRequest & { answer?: 'allow' | 'always' | 'deny' })[]
+  /** Pages attached as context to this question (shown as chips). */
+  pages?: string[]
   /** Name of the undo step holding every change Claude made in this reply. */
   undoName?: string
   undoResult?: { restored: number; skipped: number }
@@ -26,6 +30,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Extra pages given to Claude as context (Notion AI's "@" / Add context); kept for the whole chat.
+  const [attached, setAttached] = useState<string[]>([])
+  const [picker, setPicker] = useState<{ fromAt: boolean } | null>(null)
   const abort = useRef<AbortController | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const sessionId = useRef<string | undefined>(undefined)
@@ -42,6 +49,7 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
 
   const newChat = () => {
     setMessages([])
+    setAttached([])
     sessionId.current = undefined
   }
 
@@ -49,7 +57,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
     if (!text.trim() || busy) return
     setInput('')
     setError('')
-    const history: PanelMessage[] = [...messages, { role: 'user', content: text }]
+    const blocks = useStore.getState().blocks
+    const pages = attached.filter((id) => blocks[id]?.alive && id !== pageId)
+    const history: PanelMessage[] = [...messages, { role: 'user', content: text, pages: pages.length ? pages : undefined }]
     // Like Notion AI's per-turn undo: everything Claude changes in this reply is one named undo step.
     const undoName = agent ? `ai-turn-${Date.now()}` : undefined
     setMessages([...history, { role: 'assistant', content: '', undoName }])
@@ -62,17 +72,22 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
       try {
         sessionId.current = await claudeChat(
           {
-            message: text,
+            message: pages.length
+              ? `${text}\n\n(Attached pages for context — read them with read_page: ${pages.map((id) => `"${pageTitle(blocks[id])}" (id: ${id})`).join(', ')})`
+              : text,
             mode: 'agent',
             sessionId: sessionId.current,
             pageId: pageId ?? undefined,
             pageTitle: page?.properties.title,
             model: settings.models['claude-code'] || undefined,
+            fileAccess: settings.fileAccess ?? 'ask',
+            folders: (settings.folders ?? '').split('\n').map((d) => d.trim()).filter(Boolean),
           },
           {
             onText: (t) => updateLast((m) => ({ ...m, content: m.content + t })),
             onTurn: () => updateLast((m) => (m.content && !m.content.endsWith('\n\n') ? { ...m, content: m.content + '\n\n' } : m)),
             onTool: (_name, label) => updateLast((m) => ({ ...m, tools: [...(m.tools ?? []), label] })),
+            onPermission: (req) => updateLast((m) => ({ ...m, asks: [...(m.asks ?? []), req] })),
           },
           abort.current.signal,
         )
@@ -88,10 +103,13 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
       return
     }
 
-    const context = pageId ? pageToMarkdown(useStore.getState().blocks, pageId) : ''
-    // The page is attached to the latest question so answers reflect current edits.
-    const withContext = history.map((m, i) =>
-      i === history.length - 1 && context ? { ...m, content: `Current page:\n<page>\n${context}\n</page>\n\n${m.content}` } : m,
+    const context = [
+      ...(pageId ? [`Current page:\n<page>\n${pageToMarkdown(blocks, pageId)}\n</page>`] : []),
+      ...pages.map((id) => `Attached page "${pageTitle(blocks[id])}":\n<page>\n${pageToMarkdown(blocks, id)}\n</page>`),
+    ].join('\n\n')
+    // The pages are attached to the latest question so answers reflect current edits.
+    const withContext = history.map(({ role, content }, i) =>
+      i === history.length - 1 && context ? { role, content: `${context}\n\n${content}` } : { role, content },
     )
     try {
       await streamChat(settings, withContext, (chunk) =>
@@ -168,6 +186,9 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                         ⚙️ {t}…
                       </div>
                     ))}
+                    {m.asks?.map((a) => (
+                      <AskCard key={a.id} ask={a} onAnswer={(answer) => setMessages((ms) => ms.map((x) => (x === m ? { ...x, asks: x.asks!.map((y) => (y.id === a.id ? { ...y, answer } : y)) } : x)))} />
+                    ))}
                     {m.content ? <Markdown text={m.content} /> : !m.tools?.length && <span className="pulse">✨ Thinking…</span>}
                     {m.undoName && !(busy && i === messages.length - 1) && <TurnUndo message={m} onDone={(r) => setMessages((ms) => ms.map((x) => (x === m ? { ...x, undoResult: r } : x)))} />}
                     {m.content && !agent && !(busy && i === messages.length - 1) && (
@@ -178,7 +199,14 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
                     )}
                   </>
                 ) : (
-                  m.content
+                  <>
+                    {m.pages && (
+                      <div className="ai-chips">
+                        {m.pages.map((id) => <PageChip key={id} id={id} />)}
+                      </div>
+                    )}
+                    {m.content}
+                  </>
                 )}
               </div>
             ))}
@@ -192,11 +220,35 @@ export function AIPanel({ onClose, onSettings }: { onClose: () => void; onSettin
               send(input)
             }}
           >
+            <div className="ai-chips">
+              <button type="button" className="ai-chip ai-add-context" title="Add pages as context (or type @)" onClick={() => setPicker(picker ? null : { fromAt: false })}>
+                @
+              </button>
+              {page && <PageChip id={page.id} current />}
+              {attached.filter((id) => id !== pageId).map((id) => (
+                <PageChip key={id} id={id} onRemove={() => setAttached(attached.filter((x) => x !== id))} />
+              ))}
+            </div>
+            {picker && (
+              <PagePicker
+                exclude={[...attached, ...(pageId ? [pageId] : [])]}
+                onPick={(id) => {
+                  setAttached([...attached, id])
+                  if (picker.fromAt) setInput((v) => v.replace(/@$/, ''))
+                  setPicker(null)
+                }}
+                onClose={() => setPicker(null)}
+              />
+            )}
             <textarea
               value={input}
               rows={2}
               placeholder={agent ? `Ask Claude, or ask it to edit ${pageTitle(page)}…` : 'Ask AI…'}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v.length === input.length + 1 && /(^|\s)@$/.test(v)) setPicker({ fromAt: true })
+                setInput(v)
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -247,6 +299,91 @@ function TurnUndo({ message, onDone }: { message: PanelMessage; onDone: (r: { re
       >
         ↶ Undo changes
       </button>
+    </div>
+  )
+}
+
+/** A page shown as a chip in the composer / on a question. */
+function PageChip({ id, current, onRemove }: { id: string; current?: boolean; onRemove?: () => void }) {
+  const b = useStore((s) => s.blocks[id])
+  if (!b?.alive) return null
+  return (
+    <span className="ai-chip" title={current ? 'Current page (always included)' : pageTitle(b)}>
+      <span className="ai-chip-icon">{b.format.icon ?? '📄'}</span>
+      <span className="ai-chip-name">{pageTitle(b)}</span>
+      {onRemove && (
+        <button type="button" className="ai-chip-x" title="Remove" onClick={onRemove}>
+          ×
+        </button>
+      )}
+    </span>
+  )
+}
+
+/** Search box listing pages to attach, most recently edited first. */
+function PagePicker({ exclude, onPick, onClose }: { exclude: string[]; onPick: (id: string) => void; onClose: () => void }) {
+  const blocks = useStore((s) => s.blocks)
+  const [q, setQ] = useState('')
+  const [sel, setSel] = useState(0)
+  const query = q.trim().toLowerCase()
+  const matches = Object.values(blocks)
+    .filter((b) => b.alive && b.type === 'page' && !exclude.includes(b.id) && pageTitle(b).toLowerCase().includes(query))
+    .sort((a, b) => b.last_edited_time - a.last_edited_time)
+    .slice(0, 8)
+  return (
+    <div className="ai-picker">
+      <input
+        autoFocus
+        className="ai-picker-search"
+        placeholder="Search for a page…"
+        value={q}
+        onChange={(e) => {
+          setQ(e.target.value)
+          setSel(0)
+        }}
+        onBlur={() => setTimeout(onClose, 150)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose()
+          else if (e.key === 'ArrowDown') setSel((sel + 1) % Math.max(1, matches.length))
+          else if (e.key === 'ArrowUp') setSel((sel - 1 + matches.length) % Math.max(1, matches.length))
+          else if (e.key === 'Enter') {
+            e.preventDefault()
+            if (matches[sel]) onPick(matches[sel].id)
+          } else return
+          e.stopPropagation()
+        }}
+      />
+      {matches.map((b, i) => (
+        <div key={b.id} className={`menu-item compact ${i === sel ? 'active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => onPick(b.id)}>
+          <span className="ai-chip-icon">{b.format.icon ?? '📄'}</span> {pageTitle(b)}
+        </div>
+      ))}
+      {!matches.length && <div className="menu-section">No pages found</div>}
+    </div>
+  )
+}
+
+/** "Claude wants to read a file" — Allow once / Allow for this chat / Deny. */
+function AskCard({ ask, onAnswer }: { ask: NonNullable<PanelMessage['asks']>[number]; onAnswer: (a: 'allow' | 'always' | 'deny') => void }) {
+  const answer = (a: 'allow' | 'always' | 'deny') => {
+    onAnswer(a)
+    answerPermission(ask.id, a !== 'deny', a === 'always')
+  }
+  return (
+    <div className={`ai-ask ${ask.answer ? 'answered' : ''}`}>
+      <div className="ai-ask-title">
+        <Icon name="page" size={14} /> {ask.answer ? ask.label : `Claude wants to: ${ask.label.toLowerCase()}`}
+      </div>
+      {ask.detail && <div className="ai-ask-detail" title={ask.detail}>{ask.detail}</div>}
+      {ask.answer ? (
+        <div className="ai-ask-result">{ask.answer === 'deny' ? 'Denied' : ask.answer === 'always' ? 'Allowed for this chat' : 'Allowed'}</div>
+      ) : (
+        <div className="ai-ask-actions">
+          <button className="btn small primary" onClick={() => answer('allow')}>Allow</button>
+          <button className="btn small" onClick={() => answer('always')}>Allow for this chat</button>
+          <button className="btn small" onClick={() => answer('deny')}>Deny</button>
+        </div>
+      )}
     </div>
   )
 }

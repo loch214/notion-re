@@ -4,6 +4,8 @@ import { htmlToText } from '../markdown'
 import { pagePath, pageTitle, START_PAGE_KEY, useStore } from '../store'
 import { setThemePref, useThemePref, type ThemePref } from '../theme'
 import type { AIProvider, AISettings } from '../types'
+import { Switch } from './DatePicker'
+import { weekStartsMonday } from '../../shared/dates'
 import { initials, setProfileName, useProfileName } from '../profile'
 import { Dropdown } from './Dropdown'
 import { Icon, type IconName } from './Icons'
@@ -77,6 +79,7 @@ function PreferencesPane() {
   const blocks = useStore((st) => st.blocks)
   const rootPages = useStore((st) => st.rootPages)
   const [start, setStart] = useState(() => localStorage.getItem(START_PAGE_KEY) ?? '')
+  const [monday, setMonday] = useState(weekStartsMonday)
   const pages = rootPages.filter((id) => blocks[id]?.alive)
   return (
     <>
@@ -102,7 +105,18 @@ function PreferencesPane() {
               setStart(v)
               localStorage.setItem(START_PAGE_KEY, v)
             }}
-            options={[{ value: '', label: 'Last visited page' }, ...pages.map((id) => ({ value: id, label: `${blocks[id].format.icon ? blocks[id].format.icon + ' ' : ''}${pageTitle(blocks[id])}` }))]}
+            options={[{ value: '', label: 'Last visited page' }, { value: 'home', label: 'Home' }, ...pages.map((id) => ({ value: id, label: `${blocks[id].format.icon ? blocks[id].format.icon + ' ' : ''}${pageTitle(blocks[id])}` }))]}
+          />
+        </Row>
+      </Section>
+      <Section title="Language & time">
+        <Row title="Start week on Monday" desc="This will change how all calendars in your app look">
+          <Switch
+            on={monday}
+            onChange={(v) => {
+              setMonday(v)
+              localStorage.setItem('notion-re:week-monday', v ? '1' : '0')
+            }}
           />
         </Row>
       </Section>
@@ -175,6 +189,31 @@ function AIPane() {
             onChange={(e) => update({ models: { ...s.models, [p]: e.target.value.trim() } })}
           />
         </Row>
+        {p === 'claude-code' && (
+          <Row title="File access" desc="Let Claude read files on this computer (documents, PDFs, images, notes) and add them to your pages. It can't change or delete them.">
+            <Dropdown<'off' | 'ask' | 'auto'>
+              value={s.fileAccess ?? 'ask'}
+              width={200}
+              onChange={(v) => update({ fileAccess: v })}
+              options={[
+                { value: 'ask', label: 'Ask every time' },
+                { value: 'auto', label: 'Automatic' },
+                { value: 'off', label: 'Off' },
+              ]}
+            />
+          </Row>
+        )}
+        {p === 'claude-code' && (s.fileAccess ?? 'ask') !== 'off' && (
+          <Row title="Folders" desc="One folder per line. Leave empty for your home folder and other drives.">
+            <textarea
+              className="input set-input set-folders"
+              rows={3}
+              value={s.folders ?? ''}
+              placeholder={'C:\\Users\\you\nD:\\'}
+              onChange={(e) => update({ folders: e.target.value })}
+            />
+          </Row>
+        )}
         <Row title="Test connection" desc={test.state === 'idle' ? 'Sends a tiny test message.' : <span className={`test-${test.state}`}>{test.state === 'running' ? 'Testing…' : test.msg}</span>}>
           <button className="btn" onClick={runTest} disabled={test.state === 'running'}>Test</button>
         </Row>

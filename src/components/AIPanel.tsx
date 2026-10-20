@@ -333,7 +333,7 @@ export function AIPanel({ open, mode, onMode, onClose, onSettings }: { open: boo
             onClose={() => setMenu(null)}
             entries={MODES.flatMap(([m, label, icon], k): MenuEntry[] => [
               ...(k === 2 ? [{ kind: 'sep' } as MenuEntry] : []),
-              { label, icon, active: m === mode, kbd: m === mode ? '✓' : undefined, onClick: () => onMode(m) },
+              { label, icon, active: m === mode, onClick: () => onMode(m) },
             ])}
           />
         )}

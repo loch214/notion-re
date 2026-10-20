@@ -897,3 +897,6 @@ export async function flushSaves() {
 export function isServerMode() {
   return mode === 'server'
 }
+
+// Dev only: lets the screenshot helper open pages and views.
+if (import.meta.env.DEV) (window as unknown as { __store: typeof useStore }).__store = useStore

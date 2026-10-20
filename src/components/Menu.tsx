@@ -63,7 +63,7 @@ function Rows({ entries, onClose, active, setActive, openSub }: { entries: MenuE
         return (
           <div
             key={i}
-            className={`amenu-item ${e.danger ? 'danger' : ''} ${e.disabled ? 'disabled' : ''} ${idx === active || e.active ? 'active' : ''}`}
+            className={`amenu-item ${e.danger ? 'danger' : ''} ${e.disabled ? 'disabled' : ''} ${idx === active ? 'active' : ''}`}
             title={e.title}
             role="menuitem"
             onMouseEnter={(ev) => {
@@ -83,6 +83,7 @@ function Rows({ entries, onClose, active, setActive, openSub }: { entries: MenuE
             {e.kbd && <kbd>{e.kbd}</kbd>}
             {e.toggle !== undefined && <span className={`switch ${e.toggle ? 'on' : ''}`} />}
             {(e.sub || e.subNode) && <Icon name="right" size={14} className="amenu-arrow" />}
+            {e.active && !e.sub && e.toggle === undefined && <Icon name="check" size={14} className="amenu-check" />}
           </div>
         )
       })}

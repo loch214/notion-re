@@ -200,6 +200,10 @@ export interface DbView {
   hidden?: string[]
   /** Table: Calculate row, property id → function. */
   calcs?: Record<string, CalcFn>
+  /** Table: property ids whose cells wrap onto several lines ("Wrap content"). */
+  wrap?: string[]
+  /** Board: group (option) ids hidden from the board ("" = the "No …" group). */
+  hidden_groups?: string[]
   /** Board: the select property whose options become columns. */
   group_by?: string
   /** Calendar: the date property that places rows on days. */

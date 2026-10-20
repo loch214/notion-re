@@ -2,15 +2,15 @@
 // Model: the database is a page with a `schema`; each row is a child page whose cell
 // values live in `properties.cells[propertyId]`.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { DateCell } from './DatePicker'
 import { openRow } from './Peek'
 import { DragIcon, Icon, PlusIcon, TriangleIcon } from './Icons'
-import { ActionMenu } from './Menu'
+import { ActionMenu, type MenuEntry } from './Menu'
 import { pageUrl } from '../router'
 import { askNotificationPermission } from '../reminders'
 import { cellRaw, dbRows, isSingleChoice, OPTION_COLORS, PROPERTY_TYPES, shortId, statusOptions } from '../../shared/blocks.ts'
-import { isDateValue } from '../../shared/dates.ts'
+import { DATE_FORMATS, isDateValue } from '../../shared/dates.ts'
 import { calcLabel, calcOptions, calculate, formatNumber, NUMBER_FORMATS, parseNumber } from '../../shared/calc.ts'
 import { getViews } from '../../shared/views.ts'
 import { useStore } from '../store'
@@ -20,6 +20,9 @@ export const TYPE_ICON: Record<PropertyType, string> = {
   title: 'Aa',
   ...Object.fromEntries(PROPERTY_TYPES.map((t) => [t.type, t.icon])),
 } as Record<PropertyType, string>
+
+/** True inside a table column with "Wrap content" on: text cells grow to show every line. */
+const WrapCtx = createContext(false)
 
 const defaultWidth = (p: DbProperty) => p.width ?? (p.type === 'title' ? 260 : p.type === 'checkbox' ? 90 : 180)
 
@@ -47,9 +50,10 @@ export function Popover({ anchor, onClose, children, width = 240, height }: { an
 }
 
 /** Table layout: rows = the view's (filtered, sorted) rows; columns = the view's visible properties. */
-export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block[]; view: DbView; onNewRow: () => void }) {
+export function TableBody({ db, rows, view, onNewRow, onFilter }: { db: Block; rows: Block[]; view: DbView; onNewRow: () => void; onFilter?: (propId: string) => void }) {
   const dbId = db.id
-  const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
+  const [menu, setMenu] = useState<{ propId: string; rect: DOMRect; edit?: boolean } | null>(null)
+  const [dragCol, setDragCol] = useState<string | null>(null)
   const [calc, setCalc] = useState<{ propId: string; rect: DOMRect } | null>(null)
   const [dropRow, setDropRow] = useState<{ id: string; pos: 'before' | 'after' } | null>(null)
   const S = useStore.getState
@@ -83,7 +87,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
   const addProperty = (rect: DOMRect) => {
     const prop: DbProperty = { id: shortId(), name: `Property ${allColumns.length}`, type: 'text' }
     S().updateBlock(dbId, { schema: [...allColumns, prop] })
-    setMenu({ propId: prop.id, rect })
+    setMenu({ propId: prop.id, rect, edit: true })
   }
 
   return (
@@ -101,7 +105,21 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
             <tr>
               <th className="db-gutter" />
               {schema.map((p) => (
-                <th key={p.id}>
+                <th
+                  key={p.id}
+                  className={dragCol && dragCol !== p.id ? 'db-th-drop' : ''}
+                  onDragOver={(e) => dragCol && e.dataTransfer.types.includes('application/x-db-col') && e.preventDefault()}
+                  onDrop={(e) => {
+                    // Drag a column header onto another to move it there (Notion reorders columns by dragging).
+                    e.preventDefault()
+                    const from = e.dataTransfer.getData('application/x-db-col')
+                    setDragCol(null)
+                    if (!from || from === p.id) return
+                    const next = allColumns.filter((c) => c.id !== from)
+                    next.splice(next.findIndex((c) => c.id === p.id) + (allColumns.findIndex((c) => c.id === from) < allColumns.findIndex((c) => c.id === p.id) ? 1 : 0), 0, allColumns.find((c) => c.id === from)!)
+                    S().updateBlock(dbId, { schema: next })
+                  }}
+                >
                   <span
                     className="db-col-resize"
                     onMouseDown={(e) => {
@@ -123,7 +141,17 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
                       window.addEventListener('mouseup', up)
                     }}
                   />
-                  <button className="db-th" onClick={(e) => setMenu({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })}>
+                  <button
+                    className="db-th"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('application/x-db-col', p.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDragCol(p.id)
+                    }}
+                    onDragEnd={() => setDragCol(null)}
+                    onClick={(e) => setMenu({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })}
+                  >
                     <span className="db-type-icon">{TYPE_ICON[p.type]}</span>
                     <span className="db-th-name">{p.name}</span>
                   </button>
@@ -159,7 +187,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
                   <RowHandle rowId={row.id} view={view} onDragEnd={() => setDropRow(null)} />
                 </td>
                 {schema.map((p) => (
-                  <td key={p.id} className={`db-td db-td-${p.type}`}>
+                  <td key={p.id} className={`db-td db-td-${p.type} ${view.wrap?.includes(p.id) ? 'wrap' : ''}`}>
                     {p.type === 'title' ? (
                       <TitleCell
                         row={row}
@@ -170,7 +198,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
                         onToggle={() => setShut({ ...shut, [row.id]: !shut[row.id] })}
                         onAddSub={() => addSub(row.id)}
                       />
-                    ) : <Cell prop={p} row={row} dbId={dbId} />}
+                    ) : <WrapCtx.Provider value={!!view.wrap?.includes(p.id)}><Cell prop={p} row={row} dbId={dbId} /></WrapCtx.Provider>}
                   </td>
                 ))}
                 <td />
@@ -211,7 +239,7 @@ export function TableBody({ db, rows, view, onNewRow }: { db: Block; rows: Block
         </table>
       </div>
       {menu && allColumns.some((p) => p.id === menu.propId) && (
-        <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />
+        <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} view={view} onFilter={onFilter} startInEdit={menu.edit} />
       )}
       {calc && allColumns.some((p) => p.id === calc.propId) && (
         <Popover anchor={calc.rect} onClose={() => setCalc(null)} width={220}>
@@ -285,6 +313,7 @@ function TextInput({
   const [draft, setDraft] = useState(value)
   const [focused, setFocused] = useState(false)
   const editing = useRef(false)
+  const wrap = useContext(WrapCtx) && type === 'text'
   useEffect(() => {
     if (!editing.current) setDraft(value)
   }, [value])
@@ -293,10 +322,12 @@ function TextInput({
     setFocused(false)
     if (draft !== value) onCommit(draft)
   }
+  const Tag = wrap ? 'textarea' : 'input'
   return (
-    <input
-      className="db-input"
-      type={type}
+    <Tag
+      className={`db-input ${wrap ? 'wrap' : ''}`}
+      rows={wrap ? 1 : undefined}
+      type={wrap ? undefined : type}
       value={focused || display === undefined ? draft : display}
       placeholder={placeholder}
       onFocus={() => {
@@ -306,11 +337,14 @@ function TextInput({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') e.currentTarget.blur()
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          e.currentTarget.blur()
+        }
         if (e.key === 'Escape') {
           setDraft(value)
           editing.current = false
-          requestAnimationFrame(() => (e.target as HTMLInputElement).blur())
+          requestAnimationFrame(() => (e.target as HTMLElement).blur())
         }
       }}
     />
@@ -522,118 +556,169 @@ function convertCells(db: Block, prop: DbProperty, to: PropertyType): { options?
   return { options: to === 'select' || to === 'status' || to === 'multi_select' ? options : undefined }
 }
 
-export function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: string; anchor: DOMRect; onClose: () => void }) {
+/** Where a menu opens under an anchor: below it, kept inside the window. */
+export function menuPos(anchor: DOMRect, width = 260): CSSProperties {
+  const left = Math.max(8, Math.min(anchor.left, innerWidth - width - 8))
+  const below = innerHeight - anchor.bottom > 320
+  return below ? { left, top: anchor.bottom + 4, width } : { left, bottom: innerHeight - anchor.top + 4, width, maxHeight: anchor.top - 12 }
+}
+
+/** The menu of one select / status option: rename, delete, colour (Notion's option menu). */
+function optionMenu(db: Block, prop: DbProperty, o: SelectOption): MenuEntry {
+  const set = (options: SelectOption[]) => updateProperty(db.id, prop.id, { options })
+  return {
+    label: o.name,
+    icon: <span className={`db-color-dot opt-${o.color}`} />,
+    subWidth: 220,
+    subNode: (
+      <input
+        className="pm-option-name"
+        defaultValue={o.name}
+        onBlur={(e) => {
+          const n = e.target.value.trim()
+          if (n && n !== o.name) set(prop.options!.map((x) => (x.id === o.id ? { ...x, name: n } : x)))
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+      />
+    ),
+    sub: [
+      { label: 'Delete', icon: 'trash', onClick: () => set(prop.options!.filter((x) => x.id !== o.id)) },
+      { kind: 'sep' },
+      { kind: 'section', label: 'Colors' },
+      ...OPTION_COLORS.map((c): MenuEntry => ({
+        label: c === 'default' ? 'Default' : c[0].toUpperCase() + c.slice(1),
+        icon: <span className={`db-color-swatch opt-${c}`} />,
+        active: o.color === c,
+        onClick: () => set(prop.options!.map((x) => (x.id === o.id ? { ...x, color: c } : x))),
+      })),
+    ],
+  }
+}
+
+/**
+ * Notion's property menu. From a table header (with `view`): name, Edit property, Change type, Filter, Sort,
+ * Hide, Wrap content, Insert left / right, Duplicate, Delete. From a row page: name, Edit property, Duplicate,
+ * Delete. "Edit property" swaps in the edit panel (type, format, options).
+ */
+export function PropertyMenu({ db, propId, anchor, onClose, view, onFilter, startInEdit }: {
+  db: Block
+  propId: string
+  anchor: DOMRect
+  onClose: () => void
+  view?: DbView
+  onFilter?: (propId: string) => void
+  startInEdit?: boolean
+}) {
   const S = useStore.getState
   const prop = db.schema!.find((p) => p.id === propId)!
   const [name, setName] = useState(prop.name)
+  const [edit, setEdit] = useState(!!startInEdit)
   const isTitle = prop.type === 'title'
   const saveName = () => name.trim() && name !== prop.name && updateProperty(db.id, propId, { name: name.trim() })
-
-  const move = (d: -1 | 1) => {
-    const schema = [...db.schema!]
-    const i = schema.findIndex((p) => p.id === propId)
-    const j = i + d
-    if (j < 0 || j >= schema.length) return
-    ;[schema[i], schema[j]] = [schema[j], schema[i]]
-    S().updateBlock(db.id, { schema })
+  const close = () => {
+    saveName()
+    onClose()
   }
+  const schema = db.schema!
+  const index = schema.findIndex((p) => p.id === propId)
+  const setView = (patch: Partial<DbView>) => view && S().updateBlock(db.id, { views: getViews(db).map((v) => (v.id === view.id ? { ...v, ...patch } : v)) })
 
-  return (
-    <Popover anchor={anchor} onClose={() => { saveName(); onClose() }}>
+  const insert = (at: number) => {
+    const next = [...schema]
+    next.splice(at, 0, { id: shortId(), name: `Property ${schema.length}`, type: 'text' })
+    S().updateBlock(db.id, { schema: next })
+  }
+  const duplicate = () =>
+    S().transact(() => {
+      const copy: DbProperty = { ...structuredClone(prop), id: shortId(), name: `${prop.name} (1)` }
+      const next = [...schema]
+      next.splice(index + 1, 0, copy)
+      S().updateBlock(db.id, { schema: next })
+      for (const row of dbRows(S().blocks, db)) {
+        const v = row.properties.cells?.[prop.id]
+        if (v !== undefined && v !== null) S().setCell(row.id, copy.id, structuredClone(v))
+      }
+    })
+  const remove = () => S().updateBlock(db.id, { schema: schema.filter((p) => p.id !== propId) })
+  const changeType = (to: PropertyType) => {
+    if (to === prop.type) return
+    const extra = convertCells(db, prop, to)
+    updateProperty(db.id, propId, { type: to, ...extra })
+  }
+  const types: MenuEntry[] = PROPERTY_TYPES.map((t) => ({ label: t.label, icon: <span className="db-type-icon">{t.icon}</span>, active: t.type === prop.type, onClick: () => changeType(t.type) }))
+  const typeLabel = isTitle ? 'Title' : PROPERTY_TYPES.find((t) => t.type === prop.type)?.label
+
+  const header = (
+    <div className="pm-name">
+      <span className="pm-type" title={typeLabel}>{TYPE_ICON[prop.type]}</span>
       <input
         autoFocus
-        className="db-prop-name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         onBlur={saveName}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            saveName()
-            onClose()
-          }
+          if (e.key === 'Enter') close()
         }}
       />
-      {!isTitle && (
-        <>
-          <div className="menu-section">Type</div>
-          {PROPERTY_TYPES.map((t) => (
-            <div
-              key={t.type}
-              className={`menu-item compact ${t.type === prop.type ? 'active' : ''}`}
-              onClick={() => {
-                if (t.type === prop.type) return
-                const extra = convertCells(db, prop, t.type)
-                updateProperty(db.id, propId, { type: t.type, ...extra })
-              }}
-            >
-              <span className="db-type-icon">{t.icon}</span> {t.label}
-            </div>
-          ))}
-        </>
-      )}
-      {prop.type === 'number' && (
-        <>
-          <div className="menu-section">Number format</div>
-          <select
-            className="db-number-format"
-            value={prop.number_format ?? 'number'}
-            onChange={(e) => updateProperty(db.id, propId, { number_format: e.target.value === 'number' ? undefined : (e.target.value as DbProperty['number_format']) })}
-          >
-            {NUMBER_FORMATS.map((f) => (
-              <option key={f.value} value={f.value}>{f.label}</option>
-            ))}
-          </select>
-        </>
-      )}
-      {(isSingleChoice(prop.type) || prop.type === 'multi_select') && !!prop.options?.length && (
-        <>
-          <div className="menu-section">Options (rename, or click the dot to change colour)</div>
-          {prop.options.map((o) => (
-            <div key={o.id} className="menu-item compact db-option-row">
-              <button
-                className={`db-color-dot opt-${o.color}`}
-                title="Change colour"
-                onClick={() => {
-                  const next = OPTION_COLORS[(OPTION_COLORS.indexOf(o.color) + 1) % OPTION_COLORS.length]
-                  updateProperty(db.id, propId, { options: prop.options!.map((x) => (x.id === o.id ? { ...x, color: next } : x)) })
-                }}
-              />
-              <input
-                className="db-option-name"
-                defaultValue={o.name}
-                onBlur={(e) => {
-                  const n = e.target.value.trim()
-                  if (n && n !== o.name) updateProperty(db.id, propId, { options: prop.options!.map((x) => (x.id === o.id ? { ...x, name: n } : x)) })
-                }}
-                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-              />
-              <span style={{ flex: 1 }} />
-              <button
-                className="ctl"
-                title="Delete option"
-                onClick={() => updateProperty(db.id, propId, { options: prop.options!.filter((x) => x.id !== o.id) })}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </>
-      )}
-      <div className="menu-section">Actions</div>
-      <div className="menu-item compact" onClick={() => move(-1)}>← Move left</div>
-      <div className="menu-item compact" onClick={() => move(1)}>→ Move right</div>
-      {!isTitle && (
-        <div
-          className="menu-item compact danger"
-          onClick={() => {
-            S().updateBlock(db.id, { schema: db.schema!.filter((p) => p.id !== propId) })
-            onClose()
-          }}
-        >
-          🗑 Delete property
-        </div>
-      )}
-    </Popover>
+    </div>
+  )
+
+  const entries: MenuEntry[] = edit
+    ? [
+        isTitle
+          ? { label: 'Type', icon: 'refresh', value: 'Title', disabled: true }
+          : { label: 'Type', icon: 'refresh', value: typeLabel, sub: types },
+        ...(prop.type === 'number'
+          ? [{ label: 'Number format', icon: 'hash', value: NUMBER_FORMATS.find((f) => f.value === (prop.number_format ?? 'number'))?.label, sub: NUMBER_FORMATS.map((f): MenuEntry => ({ label: f.label, active: (prop.number_format ?? 'number') === f.value, onClick: () => updateProperty(db.id, propId, { number_format: f.value === 'number' ? undefined : f.value }) })) } as MenuEntry]
+          : []),
+        ...(prop.type === 'date'
+          ? ([
+              { label: 'Date format', icon: 'calendar', value: DATE_FORMATS.find((f) => f.value === (prop.date_format ?? 'full'))?.label, sub: DATE_FORMATS.map((f): MenuEntry => ({ label: f.label, active: (prop.date_format ?? 'full') === f.value, onClick: () => updateProperty(db.id, propId, { date_format: f.value }) })) },
+              { label: 'Time format', icon: 'clock', value: prop.time_format === '24' ? '24 hour' : '12 hour', sub: (['12', '24'] as const).map((f): MenuEntry => ({ label: `${f} hour`, active: (prop.time_format ?? '12') === f, onClick: () => updateProperty(db.id, propId, { time_format: f }) })) },
+            ] as MenuEntry[])
+          : []),
+        ...((isSingleChoice(prop.type) || prop.type === 'multi_select')
+          ? ([{ kind: 'sep' }, { kind: 'section', label: 'Options' }, ...(prop.options ?? []).map((o) => optionMenu(db, prop, o)),
+              { label: 'Add an option', icon: <PlusIcon />, keepOpen: true, onClick: () => updateProperty(db.id, propId, { options: [...(prop.options ?? []), { id: shortId(), name: `Option ${(prop.options?.length ?? 0) + 1}`, color: OPTION_COLORS[1 + ((prop.options?.length ?? 0) % (OPTION_COLORS.length - 1))] }] }) }] as MenuEntry[])
+          : []),
+        { kind: 'sep' },
+        { label: 'Duplicate property', icon: 'duplicate', onClick: duplicate },
+        ...(isTitle ? [] : [{ label: 'Delete property', icon: 'trash', danger: true, onClick: remove } as MenuEntry]),
+      ]
+    : [
+        { label: 'Edit property', icon: 'sliders', keepOpen: true, onClick: () => setEdit(true) },
+        ...(!isTitle ? [{ label: 'Change type', icon: 'refresh', value: typeLabel, sub: types } as MenuEntry] : []),
+        ...(view
+          ? ([
+              { kind: 'sep' },
+              ...(onFilter ? [{ label: 'Filter', icon: 'filter', onClick: () => onFilter(propId) }] : []),
+              { label: 'Sort ascending', icon: 'arrowUp', onClick: () => setView({ sort: [{ property: propId, direction: 'ascending' }] }) },
+              { label: 'Sort descending', icon: 'arrowDown', onClick: () => setView({ sort: [{ property: propId, direction: 'descending' }] }) },
+              ...(!isTitle ? [{ label: 'Hide', icon: 'eyeOff', onClick: () => setView({ hidden: [...(view.hidden ?? []), propId] }) }] : []),
+              {
+                label: 'Wrap content',
+                icon: 'wrap',
+                toggle: !!view.wrap?.includes(propId),
+                onClick: () => setView({ wrap: view.wrap?.includes(propId) ? view.wrap.filter((x) => x !== propId) : [...(view.wrap ?? []), propId] }),
+              },
+              { kind: 'sep' },
+              { label: 'Insert left', icon: 'arrowLeft', onClick: () => insert(index) },
+              { label: 'Insert right', icon: 'arrowRight', onClick: () => insert(index + 1) },
+            ] as MenuEntry[])
+          : [{ kind: 'sep' } as MenuEntry]),
+        { label: 'Duplicate property', icon: 'duplicate', onClick: duplicate },
+        ...(isTitle ? [] : [{ label: 'Delete property', icon: 'trash', danger: true, onClick: remove } as MenuEntry]),
+      ]
+
+  return (
+    <ActionMenu
+      entries={entries}
+      onClose={close}
+      search={false}
+      header={header}
+      className="pm-menu"
+      style={menuPos(anchor)}
+    />
   )
 }
 
@@ -643,12 +728,12 @@ export function RowProperties({ rowId }: { rowId: string }) {
   const db = useStore((s) => (row?.parent_id ? s.blocks[row.parent_id] : undefined))
   const blocks = useStore((s) => s.blocks)
   // Clicking a property name opens its menu (rename, type, options…); "+ Add a property" adds one, like Notion.
-  const [menu, setMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
+  const [menu, setMenu] = useState<{ propId: string; rect: DOMRect; edit?: boolean } | null>(null)
   if (!row || !db?.schema) return null
   const addProperty = (rect: DOMRect) => {
     const prop: DbProperty = { id: shortId(), name: 'Text', type: 'text' }
     useStore.getState().updateBlock(db.id, { schema: [...db.schema!, prop] })
-    setMenu({ propId: prop.id, rect })
+    setMenu({ propId: prop.id, rect, edit: true })
   }
   const parentId = row.properties.parent_row
   const parent = parentId && blocks[parentId]?.alive ? blocks[parentId] : undefined
@@ -682,12 +767,25 @@ export function RowProperties({ rowId }: { rowId: string }) {
       <button className="row-prop-add" onClick={(e) => addProperty(e.currentTarget.getBoundingClientRect())}>
         <PlusIcon size={14} /> Add a property
       </button>
-      {menu && db.schema.some((p) => p.id === menu.propId) && <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} />}
+      {menu && db.schema.some((p) => p.id === menu.propId) && <PropertyMenu db={db} propId={menu.propId} anchor={menu.rect} onClose={() => setMenu(null)} startInEdit={menu.edit} />}
     </div>
   )
 }
 
 /** Notion's row handles: "+" adds a row below, "⋮⋮" drags to reorder or (click) opens the row menu. */
+/** The row menu (⋮⋮ on table / list rows, ⋯ on board cards). */
+export function rowMenuEntries(rowId: string): MenuEntry[] {
+  const S = useStore.getState
+  return [
+    { label: 'Open in side peek', icon: 'peek', onClick: () => openRow(rowId) },
+    { label: 'Open as full page', icon: 'openFull', onClick: () => S().openPage(rowId) },
+    { kind: 'sep' },
+    { label: 'Copy link', icon: 'link', onClick: () => navigator.clipboard.writeText(pageUrl(rowId)).then(() => S().showToast({ label: 'Copied link to clipboard' })) },
+    { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().duplicate(rowId) },
+    { label: 'Delete', icon: 'trash', kbd: 'Del', danger: true, onClick: () => S().removeBlock(rowId) },
+  ]
+}
+
 export function RowHandle({ rowId, view, onDragEnd }: { rowId: string; view?: DbView; onDragEnd?: () => void }) {
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const S = useStore.getState
@@ -721,14 +819,7 @@ export function RowHandle({ rowId, view, onDragEnd }: { rowId: string; view?: Db
           style={{ left: menu.right + 4, top: Math.min(menu.top, innerHeight - 260) }}
           onClose={() => setMenu(null)}
           search={false}
-          entries={[
-            { label: 'Open in side peek', icon: 'peek', onClick: () => openRow(rowId) },
-            { label: 'Open as full page', icon: 'openFull', onClick: () => S().openPage(rowId) },
-            { kind: 'sep' },
-            { label: 'Copy link', icon: 'link', onClick: () => navigator.clipboard.writeText(pageUrl(rowId)).then(() => S().showToast({ label: 'Copied link to clipboard' })) },
-            { label: 'Duplicate', icon: 'duplicate', kbd: 'Ctrl+D', onClick: () => S().duplicate(rowId) },
-            { label: 'Delete', icon: 'trash', kbd: 'Del', danger: true, onClick: () => S().removeBlock(rowId) },
-          ]}
+          entries={rowMenuEntries(rowId)}
         />
       )}
     </span>

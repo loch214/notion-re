@@ -379,13 +379,14 @@ const SEARCH_WORDS: Partial<Record<SettingsTab, string>> = {
   shortcuts: 'keyboard keys hotkeys',
 }
 
-const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub?: string }[] = [
-  { id: 'preferences', label: 'Preferences', icon: 'sliders', title: 'Preferences', sub: 'Choose how you want Notion(RE) to look and behave' },
-  { id: 'notifications', label: 'Notifications', icon: 'bell', title: 'Notifications', sub: 'Reminders from dates and "Remind me" mentions' },
-  { id: 'sidebar', label: 'Sidebar', icon: 'sidebar', title: 'Sidebar', sub: 'Choose what shows in your sidebar' },
-  { id: 'ai', label: 'AI', icon: 'sparkle', title: 'AI', sub: 'Your own AI, used by the AI panel and inline AI' },
-  { id: 'import', label: 'Import & export', icon: 'import', title: 'Import & export' },
-  { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts' },
+// Grouped like Notion's settings nav: Account / Workspace / Features.
+const TABS: { id: SettingsTab; label: string; icon: IconName; title: string; sub?: string; group: 'Account' | 'Workspace' | 'Features' }[] = [
+  { id: 'preferences', label: 'Preferences', icon: 'sliders', title: 'Preferences', sub: 'Choose how you want Notion(RE) to look and behave', group: 'Account' },
+  { id: 'notifications', label: 'Notifications', icon: 'bell', title: 'Notifications', sub: 'Reminders from dates and "Remind me" mentions', group: 'Account' },
+  { id: 'sidebar', label: 'Sidebar', icon: 'sidebar', title: 'Sidebar', sub: 'Choose what shows in your sidebar', group: 'Workspace' },
+  { id: 'import', label: 'Import & export', icon: 'import', title: 'Import & export', sub: 'Bring pages in, or take everything out', group: 'Workspace' },
+  { id: 'ai', label: 'AI', icon: 'sparkle', title: 'AI', sub: 'Your own AI, used by the AI panel and inline AI', group: 'Features' },
+  { id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', title: 'Keyboard shortcuts', sub: 'Every shortcut in one list', group: 'Features' },
 ]
 
 export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onClose: () => void; tab?: SettingsTab }) {
@@ -406,18 +407,27 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
             <Icon name="search" size={14} />
             <input placeholder="Search settings" value={find} onChange={(e) => setFind(e.target.value)} />
           </label>
-          <div className="settings-nav-head">Account</div>
-          <button className={`settings-nav-item ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
-            <Avatar />
-            <span>{name || 'Your account'}</span>
-          </button>
-          <div className="settings-nav-head">Settings</div>
-          {TABS.filter((t) => !find.trim() || `${t.label} ${t.sub ?? ''} ${SEARCH_WORDS[t.id] ?? ''}`.toLowerCase().includes(find.trim().toLowerCase())).map((t) => (
-            <button key={t.id} className={`settings-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
-              <Icon name={t.icon} size={18} />
-              <span>{t.label}</span>
-            </button>
-          ))}
+          {(['Account', 'Workspace', 'Features'] as const).map((group) => {
+            const tabs = TABS.filter((t) => t.group === group && (!find.trim() || `${t.label} ${t.sub ?? ''} ${SEARCH_WORDS[t.id] ?? ''}`.toLowerCase().includes(find.trim().toLowerCase())))
+            if (!tabs.length && group !== 'Account') return null
+            return (
+              <div key={group}>
+                <div className="settings-nav-head">{group}</div>
+                {group === 'Account' && (
+                  <button className={`settings-nav-item ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
+                    <Avatar />
+                    <span>{name || 'Your account'}</span>
+                  </button>
+                )}
+                {tabs.map((t) => (
+                  <button key={t.id} className={`settings-nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+                    <Icon name={t.icon} size={18} />
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          })}
         </nav>
         <div className="settings-body">
           <button className="settings-close ctl" title="Close" onClick={onClose}>

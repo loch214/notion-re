@@ -1503,3 +1503,18 @@ textarea.db-input.wrap { display: block; resize: none; field-sizing: content; wh
 .search-preview-line.t-sub_header { font-size: 15px; font-weight: 600; margin-top: 8px; }
 .search-preview-line.t-sub_sub_header { font-weight: 600; margin-top: 6px; }
 .search-modal .search-foot { position: relative; z-index: 1; background: inherit; }
+
+/* Settings, measured on Notion: 90vw x (100vh - 100px), nav 240px (#202020), rows 28px, content column 800px. */
+.settings { width: 90vw; max-width: 1400px; height: calc(100vh - 100px); background: var(--bg); }
+:root[data-theme='dark'] .settings { box-shadow: rgb(56, 56, 54) 0 0 0 1px, rgba(25, 25, 25, .64) 0 24px 48px, rgba(25, 25, 25, .56) 0 4px 12px; }
+.settings-nav { padding: 8px; }
+.settings-nav-head { font-size: 12px; font-weight: 500; color: var(--faint); padding: 12px 8px 4px; }
+.settings-nav-item { height: 28px; gap: 8px; padding: 4px 6px; font-weight: 400; color: var(--text); }
+.settings-nav-item.active { font-weight: 500; background: var(--bg-hover); }
+.settings-nav-item .avatar { width: 20px; height: 20px; font-size: 11px; }
+.settings-content { max-width: 928px; margin: 0 auto; padding: 36px 64px 60px; }
+.settings-sub { font-size: 14px; }
+.set-section { margin-top: 32px; }
+.set-section h3 { font-size: 16px; font-weight: 500; padding-bottom: 12px; margin-bottom: 4px; }
+.set-row { padding: 12px 0; }
+.set-row-desc { color: var(--muted); }

@@ -173,13 +173,16 @@ function mentionItems(query: string, selfPage: string): MenuItem[] {
   const pages = Object.values(blocks)
     .filter((b) => b.type === 'page' && b.alive && b.id !== selfPage && !blocks[b.parent_id ?? '']?.schema && pageTitle(b).toLowerCase().includes(q))
     .sort((a, b) => b.last_edited_time - a.last_edited_time)
-    .slice(0, 8)
-    .map((b): MenuItem => ({ key: `page:${b.id}`, label: pageTitle(b), hint: 'Link to page', icon: b.format.icon ?? '📄', aliases: [], section: 'Pages' }))
+    .slice(0, q ? 8 : 5)
+    .map((b): MenuItem => ({ key: `page:${b.id}`, label: pageTitle(b), hint: 'Link to page', icon: b.format.icon ?? '📄', aliases: [], section: 'Link to page' }))
+  // Like Notion: with nothing typed yet the menu also offers today / tomorrow and a reminder.
   const dates: [string, number][] = [['Today', 0], ['Tomorrow', 1], ['Yesterday', -1]]
   const dateItems = dates
-    .filter(([n]) => q && n.toLowerCase().startsWith(q))
-    .map(([n, d]): MenuItem => ({ key: `date:${dateLabel(d)}`, label: n, hint: dateLabel(d), icon: '📅', aliases: [], section: 'Dates' }))
-  return [...pages, ...dateItems, ...remindItems(q)]
+    .filter(([n, d]) => (q ? n.toLowerCase().startsWith(q) : d >= 0))
+    .map(([n, d]): MenuItem => ({ key: `date:${dateLabel(d)}`, label: n, hint: dateLabel(d), icon: '📅', aliases: [], section: 'Date' }))
+  const reminders = remindItems(q || 'remind me').slice(q ? 0 : -2, q ? undefined : -1)
+  const newPage: MenuItem[] = q ? [{ key: `page:new:${query.trim()}`, label: `New "${query.trim()}" sub-page`, hint: '', icon: '＋', aliases: [], section: 'New page' }] : []
+  return [...pages, ...dateItems, ...reminders, ...newPage]
 }
 
 /** "Remind me …" in the @ menu: puts a ⏰ date in the text and a reminder on the block (shows in the Inbox). */
@@ -466,7 +469,10 @@ function BlockView({ id, pageId, number, depth }: { id: string; pageId: string; 
     if (!mention) return
     deleteTextRange(el, mention.start, mention.start + 1 + mention.query.length)
     setMention(null)
-    if (item.key.startsWith('page:')) {
+    if (item.key.startsWith('page:new:')) {
+      const sub = S().insertBlock({ parent: pageId, type: 'page', title: item.key.slice(9) })
+      document.execCommand('insertHTML', false, `<a href="#/${sub}">${escapeHtml('📄 ' + item.key.slice(9))}</a>&nbsp;`)
+    } else if (item.key.startsWith('page:')) {
       const target = S().blocks[item.key.slice(5)]
       document.execCommand('insertHTML', false, `<a href="#/${target.id}">${escapeHtml((target.format.icon ?? '📄') + ' ' + pageTitle(target))}</a>&nbsp;`)
     } else if (item.key.startsWith('date:remind:')) {

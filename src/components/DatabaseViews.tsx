@@ -281,7 +281,7 @@ function TemplatesMenu({ db, view, anchor, onClose }: { db: Block; view: DbView;
 // ---- view options ----
 
 /** Notion's "View settings": a panel docked on the right with sub-pages (← back), not a small popup. */
-type VSPage = 'main' | 'layout' | 'props' | 'edit' | 'group' | 'calendar_by' | 'timeline_by' | 'cover' | 'open_in'
+type VSPage = 'main' | 'layout' | 'props' | 'edit' | 'group' | 'calendar_by' | 'calendar_range' | 'timeline_by' | 'cover' | 'open_in'
 function ViewSettings({ top, db, view, onClose, canDelete, onFilter, onSort, onDuplicate }: {
   top: number; db: Block; view: DbView; onClose: () => void; canDelete: boolean
   onFilter: (r: DOMRect) => void; onSort: (r: DOMRect) => void; onDuplicate: () => void
@@ -348,6 +348,7 @@ function ViewSettings({ top, db, view, onClose, canDelete, onFilter, onSort, onD
         </div>
         {view.type === 'board' && row('group', 'Group by', propName(view.group_by), () => setPage('group'))}
         {view.type === 'calendar' && row('calendar', 'Show calendar by', propName(view.calendar_by), () => setPage('calendar_by'))}
+        {view.type === 'calendar' && row('calendar', 'Show calendar as', view.calendar_range === 'week' ? 'Week' : 'Month', () => setPage('calendar_range'))}
         {view.type === 'timeline' && row('timeline', 'Show timeline by', propName(view.timeline_by), () => setPage('timeline_by'))}
         {view.type === 'gallery' && row('gallery', 'Card preview', COVERS[view.cover ?? 'page_content'], () => setPage('cover'))}
         {row('peek', 'Open pages in', view.open_in === 'full_page' ? 'Full page' : 'Side peek', () => setPage('open_in'))}
@@ -389,6 +390,7 @@ function ViewSettings({ top, db, view, onClose, canDelete, onFilter, onSort, onD
       </>
     )
   } else if (page === 'group') body = choices('Group by', 'layout', [[undefined, 'None'], ...selects.map((p): [string, string] => [p.id, p.name])], view.group_by, (v) => set({ group_by: v }))
+  else if (page === 'calendar_range') body = choices('Show calendar as', 'layout', [[undefined, 'Month'], ['week', 'Week']], view.calendar_range, (v) => set({ calendar_range: v === 'week' ? 'week' : undefined }))
   else if (page === 'calendar_by') body = choices('Show calendar by', 'layout', dates.map((p): [string, string] => [p.id, p.name]), view.calendar_by, (v) => set({ calendar_by: v }))
   else if (page === 'timeline_by') body = choices('Show timeline by', 'layout', dates.map((p): [string, string] => [p.id, p.name]), view.timeline_by, (v) => set({ timeline_by: v }))
   else if (page === 'cover') body = choices('Card preview', 'layout', Object.entries(COVERS) as [string, string][], view.cover ?? 'page_content', (v) => set({ cover: v as DbView['cover'] }))
@@ -841,7 +843,7 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className={`db-calendar ${week ? 'week' : ''}`}>
       <div className="db-cal-head">
-        <b>{title}</b>
+        <span className="db-cal-title"><b>{title.split(' ')[0]}</b> {title.split(' ')[1]}</span>
         <span style={{ flex: 1 }} />
         {undated.length > 0 && (
           <button className={`db-cal-today ${noDate ? 'on' : ''}`} onClick={(e) => setNoDate(noDate ? null : e.currentTarget.getBoundingClientRect())}>
@@ -870,13 +872,11 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
             ))}
           </Popover>
         )}
-        <span className="db-cal-mode">
-          <button className={week ? '' : 'on'} onClick={() => updateView(db, view.id, { calendar_range: undefined })}>Month</button>
-          <button className={week ? 'on' : ''} onClick={() => updateView(db, view.id, { calendar_range: 'week' })}>Week</button>
+        <span className="db-nav">
+          <button className="ctl" title={week ? 'Previous week' : 'Previous month'} onClick={() => shift(-1)}><Icon name="left" size={14} /></button>
+          <button className="db-cal-today" onClick={() => setAnchor(today)}>Today</button>
+          <button className="ctl" title={week ? 'Next week' : 'Next month'} onClick={() => shift(1)}><Icon name="right" size={14} /></button>
         </span>
-        <button className="ctl" title={week ? 'Previous week' : 'Previous month'} onClick={() => shift(-1)}><Icon name="left" size={14} /></button>
-        <button className="db-cal-today" onClick={() => setAnchor(today)}>Today</button>
-        <button className="ctl" title={week ? 'Next week' : 'Next month'} onClick={() => shift(1)}><Icon name="right" size={14} /></button>
       </div>
       <div className="db-cal-dows">
         {dows.map((d) => <div key={d} className="db-cal-dow">{d}</div>)}
@@ -927,17 +927,21 @@ function CalendarBody({ db, rows, view, newRow }: BodyProps) {
 
 // ---- timeline ----
 
-const ZOOM_PX = { week: 96, month: 40, quarter: 14 } as const
-const ZOOM_LABEL = { week: 'Week', month: 'Month', quarter: 'Quarter' } as const
+const ZOOM_PX = { week: 96, month: 40, quarter: 14, year: 4 } as const
+const ZOOM_LABEL = { week: 'Week', month: 'Month', quarter: 'Quarter', year: 'Year' } as const
 
 function TimelineBody({ db, rows, view, newRow }: BodyProps) {
   const zoom = view.timeline_zoom ?? 'month'
   const ppd = ZOOM_PX[zoom]
   const today = todayIso()
   const [first, setFirst] = useState(() => addDays(today, -45))
-  const span = 200
+  const span = zoom === 'year' ? 730 : 200
   const scroller = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<{ id: string; part: 'move' | 'start' | 'end'; x: number; days: number } | null>(null)
+  const [zoomMenu, setZoomMenu] = useState<DOMRect | null>(null)
+  // The month at the left third of the visible area, shown in the toolbar like Notion ("October 2026").
+  const [shownDay, setShownDay] = useState(today)
+  const showTable = view.timeline_table !== false
   const prop = db.schema!.find((p) => p.id === view.timeline_by && p.type === 'date')
 
   const scrollTo = (day: string, smooth = false) => {
@@ -993,18 +997,30 @@ function TimelineBody({ db, rows, view, newRow }: BodyProps) {
   return (
     <div className="db-timeline">
       <div className="db-tl-head">
+        <button className="ctl" title={showTable ? 'Hide table' : 'Show table'} onClick={() => updateView(db, view.id, { timeline_table: showTable ? false : undefined })}>
+          <Icon name={showTable ? 'collapse' : 'expand'} size={16} />
+        </button>
+        <span className="db-cal-title">{(() => { const [m, y] = toDate(shownDay).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).split(' '); return <><b>{m}</b> {y}</> })()}</span>
         <span style={{ flex: 1 }} />
-        <span className="db-cal-mode">
-          {(['week', 'month', 'quarter'] as const).map((z) => (
-            <button key={z} className={z === zoom ? 'on' : ''} onClick={() => updateView(db, view.id, { timeline_zoom: z === 'month' ? undefined : z })}>{ZOOM_LABEL[z]}</button>
-          ))}
+        <button className="db-zoom" onClick={(e) => setZoomMenu(e.currentTarget.getBoundingClientRect())}>
+          {ZOOM_LABEL[zoom]} <Icon name="down" size={12} />
+        </button>
+        {zoomMenu && (
+          <ActionMenu
+            style={menuPos(zoomMenu, 180)}
+            onClose={() => setZoomMenu(null)}
+            search={false}
+            entries={(['week', 'month', 'quarter', 'year'] as const).map((z) => ({ label: ZOOM_LABEL[z], active: z === zoom, onClick: () => updateView(db, view.id, { timeline_zoom: z === 'month' ? undefined : z }) }))}
+          />
+        )}
+        <span className="db-nav">
+          <button className="ctl" title="Earlier" onClick={() => setFirst(addDays(first, -60))}><Icon name="left" size={14} /></button>
+          <button className="db-cal-today" onClick={() => scrollTo(today, true)}>Today</button>
+          <button className="ctl" title="Later" onClick={() => setFirst(addDays(first, 60))}><Icon name="right" size={14} /></button>
         </span>
-        <button className="ctl" title="Earlier" onClick={() => setFirst(addDays(first, -60))}><Icon name="left" size={14} /></button>
-        <button className="db-cal-today" onClick={() => scrollTo(today, true)}>Today</button>
-        <button className="ctl" title="Later" onClick={() => setFirst(addDays(first, 60))}><Icon name="right" size={14} /></button>
       </div>
       <div className="db-tl-body">
-        <div className="db-tl-names">
+        <div className={`db-tl-names ${showTable ? '' : 'hidden'}`}>
           <div className="db-tl-names-head">{db.schema!.find((p) => p.type === 'title')?.name ?? 'Name'}</div>
           {rows.map((r) => (
             <div key={r.id} className="db-tl-name" onClick={() => openRow(r.id, view, rows.map((x) => x.id))}>
@@ -1014,7 +1030,7 @@ function TimelineBody({ db, rows, view, newRow }: BodyProps) {
           ))}
           <button className="db-tl-new" onClick={() => openRow(newRow({ [prop.id]: today }), view)}><PlusIcon size={13} /> New</button>
         </div>
-        <div className="db-tl-scroll" ref={scroller}>
+        <div className="db-tl-scroll" ref={scroller} onScroll={(e) => setShownDay(addDays(first, Math.floor((e.currentTarget.scrollLeft + e.currentTarget.clientWidth / 3) / ppd)))}>
           <div className="db-tl-grid" style={{ width }}>
             <div className="db-tl-months">
               {months.map((m) => <div key={m.label} style={{ left: m.from * ppd, width: m.n * ppd }}><span>{m.label}</span></div>)}
@@ -1022,16 +1038,16 @@ function TimelineBody({ db, rows, view, newRow }: BodyProps) {
             <div className="db-tl-days">
               {days.map((d, i) => {
                 const dt = toDate(d)
-                const show = zoom !== 'quarter' || dt.getDay() === 1
+                const show = zoom === 'year' ? dt.getDate() === 1 : zoom !== 'quarter' || dt.getDay() === 1
                 return (
                   <div key={d} className={`db-tl-day ${d === today ? 'today' : ''} ${dt.getDay() % 6 === 0 ? 'weekend' : ''}`} style={{ left: i * ppd, width: ppd }}>
-                    {show && <span>{zoom === 'week' ? dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }) : dt.getDate()}</span>}
+                    {show && <span>{zoom === 'week' ? dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' }) : zoom === 'year' ? dt.toLocaleDateString('en-US', { month: 'short' }) : dt.getDate()}</span>}
                   </div>
                 )
               })}
             </div>
             <div className="db-tl-lanes" style={{ height: rows.length * 36 + 36 }}>
-              {days.map((d, i) => (dayIsWeekend(d) && zoom !== 'quarter' ? <div key={d} className="db-tl-shade" style={{ left: i * ppd, width: ppd }} /> : null))}
+              {days.map((d, i) => (dayIsWeekend(d) && zoom !== 'quarter' && zoom !== 'year' ? <div key={d} className="db-tl-shade" style={{ left: i * ppd, width: ppd }} /> : null))}
               {daysBetween(first, today) >= 0 && daysBetween(first, today) < span && (
                 <div className="db-tl-now" style={{ left: daysBetween(first, today) * ppd + ppd / 2 }} />
               )}

@@ -1446,7 +1446,8 @@ textarea.db-input.wrap { display: block; resize: none; field-sizing: content; wh
 :root[data-theme='dark'] .db-card { background: #252525; box-shadow: 0 0 0 1px rgba(255, 255, 255, .055); }
 .db-card:hover { background: var(--bg-hover); }
 :root[data-theme='dark'] .db-card:hover { background: #2c2c2c; }
-.db-card-title { font-size: 14px; font-weight: 500; line-height: 1.4; padding-right: 20px; }
+.db-card-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.db-board .db-card-title, .db-gallery .db-card-title { padding-right: 20px; }
 .db-card-more { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 6px; background: var(--popover); box-shadow: 0 0 0 1px var(--border); opacity: 0; }
 .db-card:hover .db-card-more, .db-card.menu-open .db-card-more { opacity: 1; }
 .db-card-new { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 6px; border-radius: 6px; color: var(--muted); font-size: 14px; }
@@ -1459,3 +1460,14 @@ textarea.db-input.wrap { display: block; resize: none; field-sizing: content; wh
 .db-board-show { color: var(--muted); opacity: 0; }
 .db-board-hidden-row:hover .db-board-show { opacity: 1; }
 .amenu-check { margin-left: auto; flex-shrink: 0; }
+
+/* Calendar / timeline toolbars like Notion: "October 2026" left; zoom dropdown and "‹ Today ›" right. */
+.db-cal-title { font-size: 14px; padding: 0 4px; white-space: nowrap; }
+.db-cal-title b { font-weight: 600; }
+.db-nav { display: inline-flex; align-items: center; gap: 2px; }
+.db-nav .ctl { width: 24px; height: 24px; }
+.db-zoom { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 6px; color: var(--muted); font-size: 14px; }
+.db-zoom:hover { background: var(--bg-hover); }
+.db-tl-head { padding: 4px 0 8px; }
+.db-tl-names { transition: width .2s ease; overflow: hidden; }
+.db-tl-names.hidden { width: 0; border-right: 0; }

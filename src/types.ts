@@ -212,7 +212,9 @@ export interface DbView {
   calendar_range?: 'month' | 'week'
   /** Timeline: the date property that places bars, and the zoom level. */
   timeline_by?: string
-  timeline_zoom?: 'week' | 'month' | 'quarter'
+  timeline_zoom?: 'week' | 'month' | 'quarter' | 'year'
+  /** Timeline: false hides the table of names on the left ("Show table"). */
+  timeline_table?: boolean
   /** How rows open: side peek (default) or full page. */
   open_in?: 'side_peek' | 'full_page'
   /** Gallery: what the top of each card shows. */

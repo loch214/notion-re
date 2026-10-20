@@ -531,7 +531,7 @@ function convertCells(db: Block, prop: DbProperty, to: PropertyType): { options?
   return { options: to === 'select' || to === 'status' || to === 'multi_select' ? options : undefined }
 }
 
-function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: string; anchor: DOMRect; onClose: () => void }) {
+export function PropertyMenu({ db, propId, anchor, onClose }: { db: Block; propId: string; anchor: DOMRect; onClose: () => void }) {
   const S = useStore.getState
   const prop = db.schema!.find((p) => p.id === propId)!
   const [name, setName] = useState(prop.name)

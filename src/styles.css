@@ -1347,3 +1347,27 @@ button.row-prop-name { text-align: left; border-radius: 4px; }
 button.row-prop-name:hover { background: var(--bg-hover); }
 .row-prop-add { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px; border-radius: 4px; color: var(--muted); font-size: 14px; }
 .row-prop-add:hover { background: var(--bg-hover); }
+
+/* ---- Database view settings panel (analysis/ui-audit.md §3) ---- */
+.vs-panel { top: 110px; right: 12px; bottom: 12px; width: 290px; padding: 4px 6px 8px; overflow-y: auto; display: flex; flex-direction: column; max-height: calc(100vh - 122px); height: fit-content; }
+.vs-head { display: flex; align-items: center; gap: 4px; height: 42px; padding: 0 4px 0 8px; flex: none; }
+.vs-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); }
+.vs-back { width: 24px; height: 24px; margin-left: -4px; }
+.vs-close { width: 20px; height: 20px; border-radius: 50%; background: var(--bg-hover); }
+.vs-name { display: flex; align-items: center; gap: 6px; margin: 0 4px 6px; }
+.vs-name-icon { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; flex: none; color: var(--muted); }
+.vs-name input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-hover); color: var(--text); font: inherit; font-size: 14px; outline: none; }
+.vs-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: 6px; font-size: 14px; color: var(--text); text-align: left; flex: none; }
+.vs-row:hover { background: var(--bg-hover); }
+.vs-row.muted .vs-label { color: var(--muted); }
+.vs-row.danger, .vs-row.danger .vs-icon { color: var(--red); }
+.vs-icon { width: 20px; display: grid; place-items: center; color: var(--icon, var(--muted)); flex: none; }
+.vs-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-value { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.vs-chev, .vs-eye { color: var(--muted); flex: none; }
+.vs-section { padding: 12px 8px 4px; font-size: 12px; color: var(--muted); font-weight: 500; flex: none; }
+.vs-sep { height: 1px; background: var(--border); margin: 6px 8px; flex: none; }
+.vs-layouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 4px 4px 10px; flex: none; }
+.vs-layouts button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 56px; border-radius: 8px; border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.vs-layouts button:hover { background: var(--bg-hover); }
+.vs-layouts button.on { border: 2px solid var(--accent); color: var(--accent); }

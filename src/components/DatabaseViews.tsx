@@ -1,3 +1,4 @@
+import type React from 'react'
 // Database views: tabs (table / board / list / gallery / calendar), filter and sort controls,
 // and the non-table layouts. Modelled on Notion's collection views (analysis/databases.md).
 
@@ -9,7 +10,8 @@ import { cellRaw, coverCss, dbTemplates, htmlToPlain, isSingleChoice, shortId, s
 import { applyView, boardGroups, getViews, needsValue, newView, OPERATORS, prefillFor, VIEW_TYPES } from '../../shared/views.ts'
 import { pageTitle, useStore } from '../store'
 import type { Block, CellValue, DbFilter, DbProperty, DbView, FilterOperator } from '../types'
-import { Cell, Pill, Popover, TableBody, TYPE_ICON } from './Database'
+import { Cell, Pill, Popover, PropertyMenu, TableBody, TYPE_ICON } from './Database'
+import { copyPageLink } from './PageMenu'
 
 const S = useStore.getState
 
@@ -158,7 +160,20 @@ export function DatabaseView({ dbId }: { dbId: string }) {
         </Popover>
       )}
       {menu?.kind === 'view' && (
-        <ViewMenu db={db} view={view} anchor={menu.rect} onClose={() => setMenu(null)} canDelete={views.length > 1} />
+        <ViewSettings
+          top={menu.rect.bottom + 6}
+          db={db}
+          view={view}
+          onClose={() => setMenu(null)}
+          canDelete={views.length > 1}
+          onFilter={(rect) => setMenu({ kind: 'filter', rect })}
+          onSort={(rect) => setMenu({ kind: 'sort', rect })}
+          onDuplicate={() => {
+            const copy = { ...structuredClone(view), id: shortId(), name: `${view.name} (copy)` }
+            S().updateBlock(db.id, { views: [...views, copy] })
+            setActiveId(copy.id)
+          }}
+        />
       )}
       {menu?.kind === 'filter' && <FilterMenu db={db} view={view} anchor={menu.rect} onClose={() => setMenu(null)} />}
       {menu?.kind === 'sort' && <SortMenu db={db} view={view} anchor={menu.rect} onClose={() => setMenu(null)} />}
@@ -250,102 +265,153 @@ function TemplatesMenu({ db, view, anchor, onClose }: { db: Block; view: DbView;
 
 // ---- view options ----
 
-function ViewMenu({ db, view, anchor, onClose, canDelete }: { db: Block; view: DbView; anchor: DOMRect; onClose: () => void; canDelete: boolean }) {
+/** Notion's "View settings": a panel docked on the right with sub-pages (← back), not a small popup. */
+type VSPage = 'main' | 'layout' | 'props' | 'edit' | 'group' | 'calendar_by' | 'timeline_by' | 'cover' | 'open_in'
+function ViewSettings({ top, db, view, onClose, canDelete, onFilter, onSort, onDuplicate }: {
+  top: number; db: Block; view: DbView; onClose: () => void; canDelete: boolean
+  onFilter: (r: DOMRect) => void; onSort: (r: DOMRect) => void; onDuplicate: () => void
+}) {
   const schema = db.schema!
+  const [page, setPage] = useState<VSPage>('main')
   const [name, setName] = useState(view.name)
+  const [propMenu, setPropMenu] = useState<{ propId: string; rect: DOMRect } | null>(null)
   const saveName = () => name.trim() && name !== view.name && updateView(db, view.id, { name: name.trim() })
+  const set = (patch: Partial<DbView>) => updateView(db, view.id, patch)
+  const close = () => { saveName(); onClose() }
+  const props = schema.filter((p) => p.type !== 'title')
+  const shownCount = props.filter((p) => !view.hidden?.includes(p.id)).length
   const selects = schema.filter((p) => isSingleChoice(p.type))
   const dates = schema.filter((p) => p.type === 'date')
-  const set = (patch: Partial<DbView>) => updateView(db, view.id, patch)
+  const propName = (id?: string) => schema.find((p) => p.id === id)?.name ?? 'None'
+  const COVERS: Record<string, string> = { page_content: 'Page content', page_cover: 'Page cover', none: 'None' }
+  const row = (icon: IconName | ReactNodeLike, label: string, value: string | number | undefined, onClick: (e: React.MouseEvent<HTMLButtonElement>) => void, chevron = true, cls = '') => (
+    <button className={`vs-row ${cls}`} onClick={onClick}>
+      <span className="vs-icon">{typeof icon === 'string' ? <Icon name={icon as IconName} size={16} /> : icon}</span>
+      <span className="vs-label">{label}</span>
+      {value !== undefined && value !== '' && <span className="vs-value">{value}</span>}
+      {chevron && <Icon name="right" size={14} className="vs-chev" />}
+    </button>
+  )
+  const head = (title: string, back?: VSPage) => (
+    <div className="vs-head">
+      {back && <button className="ctl vs-back" title="Back" onClick={() => setPage(back)}><Icon name="back" size={16} /></button>}
+      <span className="vs-title">{title}</span>
+      <button className="ctl vs-close" title="Close" onClick={close}><Icon name="close" size={12} /></button>
+    </div>
+  )
+  const choices = (title: string, back: VSPage, opts: [string | undefined, string][], current: string | undefined, pick: (v: string | undefined) => void) => (
+    <>
+      {head(title, back)}
+      {opts.map(([v, label]) => (
+        <button key={label} className="vs-row" onClick={() => { pick(v); setPage(back) }}>
+          <span className="vs-label">{label}</span>
+          {v === current && <Icon name="check" size={14} />}
+        </button>
+      ))}
+    </>
+  )
 
-  return (
-    <Popover anchor={anchor} onClose={() => { saveName(); onClose() }} width={260}>
-      <input autoFocus className="db-prop-name" value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName}
-        onKeyDown={(e) => e.key === 'Enter' && (saveName(), onClose())} />
-      <div className="menu-section">Layout</div>
-      <div className="db-layouts">
-        {VIEW_TYPES.map((t) => (
-          <button
-            key={t.type}
-            className={t.type === view.type ? 'on' : ''}
-            onClick={() => {
-              const fresh = newView(t.type, schema)
-              set({ type: t.type, group_by: view.group_by ?? fresh.group_by, calendar_by: view.calendar_by ?? fresh.calendar_by, timeline_by: view.timeline_by ?? fresh.timeline_by, cover: view.cover ?? fresh.cover })
-            }}
-          >
-            <span>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {view.type === 'board' && (
-        <label className="db-view-opt">
-          Group by
-          <select value={view.group_by ?? ''} onChange={(e) => set({ group_by: e.target.value || undefined })}>
-            <option value="">—</option>
-            {selects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      )}
-      <label className="db-view-opt">
-        Open pages in
-        <select value={view.open_in ?? 'side_peek'} onChange={(e) => set({ open_in: e.target.value === 'full_page' ? 'full_page' : undefined })}>
-          <option value="side_peek">Side peek</option>
-          <option value="full_page">Full page</option>
-        </select>
-      </label>
-      {view.type === 'timeline' && (
-        <label className="db-view-opt">
-          Show timeline by
-          <select value={view.timeline_by ?? ''} onChange={(e) => set({ timeline_by: e.target.value || undefined })}>
-            <option value="">—</option>
-            {dates.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      )}
-      {view.type === 'calendar' && (
-        <label className="db-view-opt">
-          Show calendar by
-          <select value={view.calendar_by ?? ''} onChange={(e) => set({ calendar_by: e.target.value || undefined })}>
-            <option value="">—</option>
-            {dates.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      )}
-      {view.type === 'gallery' && (
-        <label className="db-view-opt">
-          Card preview
-          <select value={view.cover ?? 'page_content'} onChange={(e) => set({ cover: e.target.value as DbView['cover'] })}>
-            <option value="page_content">Page content</option>
-            <option value="page_cover">Page cover</option>
-            <option value="none">None</option>
-          </select>
-        </label>
-      )}
-      <div className="menu-section">Properties shown</div>
-      {schema
-        .filter((p) => p.type !== 'title')
-        .map((p) => {
+  let body: React.ReactNode
+  if (page === 'layout') {
+    body = (
+      <>
+        {head('Layout', 'main')}
+        <div className="vs-layouts">
+          {VIEW_TYPES.map((t) => (
+            <button
+              key={t.type}
+              className={t.type === view.type ? 'on' : ''}
+              onClick={() => {
+                const fresh = newView(t.type, schema)
+                set({ type: t.type, group_by: view.group_by ?? fresh.group_by, calendar_by: view.calendar_by ?? fresh.calendar_by, timeline_by: view.timeline_by ?? fresh.timeline_by, cover: view.cover ?? fresh.cover })
+              }}
+            >
+              <Icon name={VIEW_ICONS[t.type]} size={18} />
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+        {view.type === 'board' && row('group', 'Group by', propName(view.group_by), () => setPage('group'))}
+        {view.type === 'calendar' && row('calendar', 'Show calendar by', propName(view.calendar_by), () => setPage('calendar_by'))}
+        {view.type === 'timeline' && row('timeline', 'Show timeline by', propName(view.timeline_by), () => setPage('timeline_by'))}
+        {view.type === 'gallery' && row('gallery', 'Card preview', COVERS[view.cover ?? 'page_content'], () => setPage('cover'))}
+        {row('peek', 'Open pages in', view.open_in === 'full_page' ? 'Full page' : 'Side peek', () => setPage('open_in'))}
+      </>
+    )
+  } else if (page === 'props') {
+    body = (
+      <>
+        {head('Property visibility', 'main')}
+        <div className="vs-section">Shown in {view.type}</div>
+        {props.map((p) => {
           const shown = !view.hidden?.includes(p.id)
           return (
-            <label key={p.id} className="menu-item compact">
-              <input
-                type="checkbox"
-                checked={shown}
-                onChange={() => set({ hidden: shown ? [...(view.hidden ?? []), p.id] : (view.hidden ?? []).filter((x) => x !== p.id) })}
-              />
-              <span className="db-type-icon">{TYPE_ICON[p.type]}</span> {p.name}
-            </label>
+            <button key={p.id} className={`vs-row ${shown ? '' : 'muted'}`} onClick={() => set({ hidden: shown ? [...(view.hidden ?? []), p.id] : (view.hidden ?? []).filter((x) => x !== p.id) })}>
+              <span className="vs-icon db-type-icon">{TYPE_ICON[p.type]}</span>
+              <span className="vs-label">{p.name}</span>
+              <Icon name={shown ? 'eye' : 'eyeOff'} size={16} className="vs-eye" />
+            </button>
           )
         })}
-      {canDelete && (
-        <div className="menu-item compact danger" onClick={() => { updateView(db, view.id, null); onClose() }}>
-          🗑 Delete view
+      </>
+    )
+  } else if (page === 'edit') {
+    body = (
+      <>
+        {head('Edit properties', 'main')}
+        {schema.map((p) => row(<span className="db-type-icon">{TYPE_ICON[p.type]}</span>, p.name, undefined, (e) => setPropMenu({ propId: p.id, rect: e.currentTarget.getBoundingClientRect() })))}
+        <button
+          className="vs-row muted"
+          onClick={(e) => {
+            const prop: DbProperty = { id: shortId(), name: 'Text', type: 'text' }
+            S().updateBlock(db.id, { schema: [...schema, prop] })
+            setPropMenu({ propId: prop.id, rect: e.currentTarget.getBoundingClientRect() })
+          }}
+        >
+          <span className="vs-icon"><PlusIcon size={14} /></span>
+          <span className="vs-label">New property</span>
+        </button>
+      </>
+    )
+  } else if (page === 'group') body = choices('Group by', 'layout', [[undefined, 'None'], ...selects.map((p): [string, string] => [p.id, p.name])], view.group_by, (v) => set({ group_by: v }))
+  else if (page === 'calendar_by') body = choices('Show calendar by', 'layout', dates.map((p): [string, string] => [p.id, p.name]), view.calendar_by, (v) => set({ calendar_by: v }))
+  else if (page === 'timeline_by') body = choices('Show timeline by', 'layout', dates.map((p): [string, string] => [p.id, p.name]), view.timeline_by, (v) => set({ timeline_by: v }))
+  else if (page === 'cover') body = choices('Card preview', 'layout', Object.entries(COVERS) as [string, string][], view.cover ?? 'page_content', (v) => set({ cover: v as DbView['cover'] }))
+  else if (page === 'open_in') body = choices('Open pages in', 'layout', [[undefined, 'Side peek'], ['full_page', 'Full page']], view.open_in, (v) => set({ open_in: v === 'full_page' ? 'full_page' : undefined }))
+  else {
+    body = (
+      <>
+        {head('View settings')}
+        <div className="vs-name">
+          <span className="vs-name-icon"><Icon name={VIEW_ICONS[view.type]} size={16} /></span>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === 'Enter' && saveName()} />
         </div>
-      )}
-    </Popover>
+        {row(VIEW_ICONS[view.type], 'Layout', VIEW_TYPES.find((t) => t.type === view.type)?.label, () => setPage('layout'))}
+        {row('eye', 'Property visibility', shownCount, () => setPage('props'))}
+        {row('filter', 'Filter', view.filter.filters.length || undefined, (e) => { const r = e.currentTarget.getBoundingClientRect(); onClose(); onFilter(r) })}
+        {row('sort', 'Sort', view.sort.length || undefined, (e) => { const r = e.currentTarget.getBoundingClientRect(); onClose(); onSort(r) })}
+        {view.type === 'board' && row('group', 'Group', propName(view.group_by), () => setPage('group'))}
+        {row('link', 'Copy link', undefined, () => { copyPageLink(db.id); close() }, false)}
+        <div className="vs-section">Data source settings</div>
+        {row('list', 'Edit properties', undefined, () => setPage('edit'))}
+        <div className="vs-sep" />
+        {row('duplicate', 'Duplicate view', undefined, () => { onDuplicate(); close() }, false)}
+        {canDelete && row('trash', 'Delete view', undefined, () => { updateView(db, view.id, null); onClose() }, false, 'danger')}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="backdrop" onClick={close} />
+      <div className="popover vs-panel" style={{ top: Math.min(Math.max(8, top), innerHeight - 320), maxHeight: innerHeight - Math.min(Math.max(8, top), innerHeight - 320) - 12 }} onKeyDown={(e) => e.key === 'Escape' && close()}>
+        {body}
+      </div>
+      {propMenu && schema.some((p) => p.id === propMenu.propId) && <PropertyMenu db={db} propId={propMenu.propId} anchor={propMenu.rect} onClose={() => setPropMenu(null)} />}
+    </>
   )
 }
+type ReactNodeLike = React.ReactElement
 
 // ---- filter & sort ----
 

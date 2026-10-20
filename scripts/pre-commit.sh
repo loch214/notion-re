@@ -2,7 +2,7 @@
 # Safety net: refuse commits that include private files or anything that looks like a secret.
 # Installed as .git/hooks/pre-commit (see scripts/install-hooks.sh).
 
-PRIVATE='^(analysis/|data/|src/ai\.ts$|server/mcp\.ts$|server/claude-bridge\.ts$|CLAUDE\.md$|plan\.md$|resume\.md$|NEXT-SESSION-PROMPT\.md$|\.claude/|\.env)'
+PRIVATE='^(analysis/|data/|src/ai\.ts$|server/mcp\.ts$|server/claude-bridge\.ts$|server/files-mcp\.ts$|CLAUDE\.md$|plan\.md$|resume\.md$|NEXT-SESSION-PROMPT\.md$|\.claude/|\.env)'
 bad=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$PRIVATE")
 if [ -n "$bad" ]; then
   echo "pre-commit: refusing to commit private files:" >&2

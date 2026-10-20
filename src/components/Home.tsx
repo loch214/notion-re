@@ -14,7 +14,14 @@ function greeting() {
   return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
 }
 
-const shortDate = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+/** Card dates like Notion's: "Just now", "5m ago", "1h ago" today, then "May 18". */
+const shortDate = (ms: number) => {
+  const min = Math.floor((Date.now() - ms) / 60_000)
+  if (min < 1) return 'Just now'
+  if (min < 60) return `${min}m ago`
+  if (min < 24 * 60 && new Date(ms).toDateString() === new Date().toDateString()) return `${Math.floor(min / 60)}h ago`
+  return new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
 
 export function Home() {
   const blocks = useStore((s) => s.blocks)

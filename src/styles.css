@@ -1518,3 +1518,17 @@ textarea.db-input.wrap { display: block; resize: none; field-sizing: content; wh
 .set-section h3 { font-size: 16px; font-weight: 500; padding-bottom: 12px; margin-bottom: 4px; }
 .set-row { padding: 12px 0; }
 .set-row-desc { color: var(--muted); }
+
+/* Home cards as measured on Notion: 144x144, radius 16, a faint fill instead of a border, quick hover. */
+.home-greeting { font-weight: 600; margin-bottom: 36px; }
+.home-recents { gap: 16px; }
+.home-card { background: rgba(135, 131, 120, .07); box-shadow: none; transition: background 20ms ease-in; }
+:root[data-theme='dark'] .home-card { background: rgba(255, 255, 255, .05); }
+.home-card:hover { box-shadow: none; background: rgba(135, 131, 120, .12); }
+:root[data-theme='dark'] .home-card:hover { background: rgba(255, 255, 255, .08); }
+.home-card-cover { background-color: rgba(135, 131, 120, .1); }
+.home-card-title { font-weight: 500; margin: 30px 16px 0; }
+.home-card-meta { margin: auto 16px 12px; }
+.home-card-icon { left: 16px; }
+.home-panel { border: 0; box-shadow: none; border-radius: 16px; background: rgba(135, 131, 120, .07); }
+:root[data-theme='dark'] .home-panel { background: rgba(255, 255, 255, .05); }

@@ -225,8 +225,6 @@ export interface AISettings {
   apiKeys: Partial<Record<AIProvider, string>>
   models: Partial<Record<AIProvider, string>>
   baseUrl: string
-  /** Lets the Claude agent read files on this computer: off, ask each time, or automatic. */
+  /** The Claude agent reads files on this computer: ask each time, or automatic. ('off' = old setting, treated as ask) */
   fileAccess?: 'off' | 'ask' | 'auto'
-  /** Folders it may read, one per line (empty = home folder and other drives). */
-  folders?: string
 }

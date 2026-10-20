@@ -6,7 +6,7 @@ import { setThemePref, useThemePref, type ThemePref } from '../theme'
 import type { AIProvider, AISettings } from '../types'
 import { Switch } from './DatePicker'
 import { weekStartsMonday } from '../../shared/dates'
-import { initials, setProfileName, useProfileName } from '../profile'
+import { Avatar, photoFromFile, setProfile, useProfile, useProfileName } from '../profile'
 import { Dropdown } from './Dropdown'
 import { Icon, type IconName } from './Icons'
 import { importMarkdown } from './Sidebar'
@@ -52,18 +52,39 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function AccountPane() {
-  const name = useProfileName()
-  const [draft, setDraft] = useState(name)
+  const profile = useProfile()
+  const [draft, setDraft] = useState(profile)
+  const save = (patch: Partial<typeof profile>) => setProfile(patch)
   return (
     <>
       <Section title="My profile">
         <div className="set-profile">
-          <span className="avatar large">{initials(draft)}</span>
+          <div className="set-photo">
+            <label className="set-photo-pick" title="Upload a photo">
+              <Avatar className="large" />
+              <input
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={async (e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) save({ photo: await photoFromFile(f) })
+                }}
+              />
+            </label>
+            {profile.photo && <button className="btn small" onClick={() => save({ photo: '' })}>Remove photo</button>}
+          </div>
           <label className="set-field">
             <span>Preferred name</span>
-            <input className="input" value={draft} placeholder="Your name" onChange={(e) => setDraft(e.target.value)} onBlur={() => setProfileName(draft.trim())} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+            <input className="input" value={draft.name} placeholder="Your name" onChange={(e) => setDraft({ ...draft, name: e.target.value })} onBlur={() => save({ name: draft.name.trim() })} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
           </label>
         </div>
+      </Section>
+      <Section title="Account security">
+        <Row title="Email" desc="Shown on your profile. There's no sign-in: Notion(RE) runs on this computer only.">
+          <input className="input set-input" type="email" value={draft.email} placeholder="you@example.com" onChange={(e) => setDraft({ ...draft, email: e.target.value })} onBlur={() => save({ email: draft.email.trim() })} onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+        </Row>
       </Section>
       <Section title="This device">
         <Row title="Where your pages are saved" desc="In data/workspace.json in the app folder, on this computer only. Page history is in data/history.">
@@ -190,27 +211,15 @@ function AIPane() {
           />
         </Row>
         {p === 'claude-code' && (
-          <Row title="File access" desc="Let Claude read files on this computer (documents, PDFs, images, notes) and add them to your pages. It can't change or delete them.">
-            <Dropdown<'off' | 'ask' | 'auto'>
-              value={s.fileAccess ?? 'ask'}
+          <Row title="File access" desc="Claude can read files in your home folder and on other drives (documents, PDFs, images, notes) and add them to your pages. It can't change or delete them, and never reads keys or passwords (.ssh, .aws, .env).">
+            <Dropdown<'ask' | 'auto'>
+              value={s.fileAccess === 'auto' ? 'auto' : 'ask'}
               width={200}
               onChange={(v) => update({ fileAccess: v })}
               options={[
                 { value: 'ask', label: 'Ask every time' },
                 { value: 'auto', label: 'Automatic' },
-                { value: 'off', label: 'Off' },
               ]}
-            />
-          </Row>
-        )}
-        {p === 'claude-code' && (s.fileAccess ?? 'ask') !== 'off' && (
-          <Row title="Folders" desc="One folder per line. Leave empty for your home folder and other drives.">
-            <textarea
-              className="input set-input set-folders"
-              rows={3}
-              value={s.folders ?? ''}
-              placeholder={'C:\\Users\\you\nD:\\'}
-              onChange={(e) => update({ folders: e.target.value })}
             />
           </Row>
         )}
@@ -279,7 +288,7 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
         <nav className="settings-nav">
           <div className="settings-nav-head">Account</div>
           <button className={`settings-nav-item ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>
-            <span className="avatar">{initials(name)}</span>
+            <Avatar />
             <span>{name || 'Your account'}</span>
           </button>
           <div className="settings-nav-head">Settings</div>

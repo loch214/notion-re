@@ -4,7 +4,7 @@
 import { coverCss } from '../../shared/blocks.ts'
 import { formatDay, formatTime, parseDate, startDay, todayIso, addDays } from '../../shared/dates'
 import { doneOptionIds, openTasks, taskDatabases, upcoming, type TaskItem } from '../../shared/home'
-import { initials, useProfileName } from '../profile'
+import { Avatar, useProfileName } from '../profile'
 import { pageTitle, useStore } from '../store'
 import { readRecents } from './Sidebar'
 import { Icon, PlusIcon } from './Icons'
@@ -54,7 +54,7 @@ export function Home() {
                 <span className="home-card-icon">{p.format.icon ?? <Icon name="page" size={26} />}</span>
                 <span className="home-card-title">{pageTitle(p)}</span>
                 <span className="home-card-meta">
-                  <span className="avatar tiny">{initials(name)}</span>
+                  <Avatar className="tiny" />
                   {shortDate(p.last_edited_time)}
                 </span>
               </button>

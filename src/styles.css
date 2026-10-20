@@ -1208,3 +1208,6 @@ img.avatar { object-fit: cover; padding: 0; }
 .db-cal-today.on { background: var(--bg-hover); }
 .db-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .db-scroll:hover { scrollbar-color: var(--scrollbar, rgba(135,131,120,.4)) transparent; }
+.outline { top: 32vh; }
+.db-board { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.db-board:hover { scrollbar-color: var(--scrollbar, rgba(135,131,120,.4)) transparent; }

@@ -543,7 +543,7 @@ function BoardBody({ db, rows, view, newRow }: BodyProps) {
       {groups.map((g) => (
         <div key={g.id ?? 'none'} className="db-board-col" {...dropProps((rowId) => S().setCell(rowId, prop.id, g.id))}>
           <div className="db-board-head">
-            {g.id ? <Pill option={{ id: g.id, name: g.label, color: g.color }} /> : <span className="muted">{g.label}</span>}
+            {g.id ? <Pill option={{ id: g.id, name: g.label, color: g.color }} dot={prop.type === 'status'} /> : <span className="muted">{g.label}</span>}
             <span className="muted small">{g.rows.length}</span>
           </div>
           {g.rows.map((r) => (

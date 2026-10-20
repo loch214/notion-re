@@ -6,6 +6,7 @@ import { setThemePref, useThemePref, type ThemePref } from '../theme'
 import type { AIProvider, AISettings } from '../types'
 import { Switch } from './DatePicker'
 import { weekStartsMonday } from '../../shared/dates'
+import { coverCss } from '../../shared/blocks.ts'
 import { Avatar, photoFromFile, setProfile, useProfile, useProfileName } from '../profile'
 import { Dropdown } from './Dropdown'
 import { Icon, type IconName } from './Icons'
@@ -439,6 +440,45 @@ export function SettingsModal({ onClose, tab: firstTab = 'preferences' }: { onCl
   )
 }
 
+const PREVIEW_KEY = 'notion-re:search-preview'
+
+/** Notion's search preview: the highlighted page's cover, icon, title and first blocks. */
+function SearchPreview({ id, onOpen }: { id: string; onOpen: () => void }) {
+  const blocks = useStore((s) => s.blocks)
+  const page = blocks[id]
+  if (!page) return null
+  const lines = page.content
+    .map((c) => blocks[c])
+    .filter((b) => b?.alive)
+    .slice(0, 14)
+  return (
+    <div className="search-preview">
+      <div className="search-preview-tools">
+        <button className="ctl" title="Copy link" onClick={() => copyPageLink(id)}><Icon name="link" size={14} /></button>
+        <button className="ctl" title="Open" onClick={onOpen}><Icon name="openFull" size={14} /></button>
+      </div>
+      <div className="search-preview-cover" style={{ background: coverCss(page.format.cover) ?? undefined }} />
+      <div className="search-preview-body">
+        {page.format.icon && <div className="search-preview-icon">{page.format.icon}</div>}
+        <div className={`search-preview-title ${pageTitle(page) ? '' : 'empty'}`}>{pageTitle(page) || 'Untitled'}</div>
+        {page.schema && <div className="search-preview-line muted">Database · {page.content.filter((c) => blocks[c]?.alive).length} pages</div>}
+        {!page.schema && lines.map((b) => {
+          const text = b.type === 'page' ? pageTitle(b) : htmlToText(b.properties.title)
+          if (!text && b.type !== 'divider') return null
+          return (
+            <div key={b.id} className={`search-preview-line t-${b.type}`}>
+              {b.type === 'bulleted_list' && '• '}
+              {b.type === 'to_do' && (b.properties.checked ? '☑ ' : '☐ ')}
+              {b.type === 'page' && <Icon name="page" size={14} />}
+              {text}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function SearchModal({ onClose }: { onClose: () => void }) {
   const blocks = useStore((s) => s.blocks)
   const openPage = useStore((s) => s.openPage)
@@ -450,9 +490,13 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   const [inPage, setInPage] = useState('')
   const [sort, setSort] = useState<'edited' | 'oldest' | 'best'>('best')
   const inputRef = useRef<HTMLInputElement>(null)
+  const [preview, setPreview] = useState(() => localStorage.getItem(PREVIEW_KEY) !== 'off')
   useEffect(() => {
     inputRef.current?.focus()
-  }, [])
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   // Search page titles and block text; results point at the containing page.
   const results = useMemo(() => {
@@ -520,8 +564,10 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
   }
 
   let lastGroup = ''
+  const current = results[active - askRow]?.id
   return (
-    <Modal onClose={onClose} wide>
+    <div className="search-backdrop" onMouseDown={onClose}>
+    <div className={`search-modal ${preview ? 'with-preview' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
       <div className="search-head">
         <Icon name="search" size={18} />
         <input
@@ -543,6 +589,16 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
             e.preventDefault()
           }}
         />
+        <button
+          className={`ctl search-preview-toggle ${preview ? 'on' : ''}`}
+          title={preview ? 'Hide preview' : 'Show preview'}
+          onClick={() => {
+            localStorage.setItem(PREVIEW_KEY, preview ? 'off' : 'on')
+            setPreview(!preview)
+          }}
+        >
+          <Icon name="peek" size={18} />
+        </button>
       </div>
       <div className="search-filters">
         <button className={`search-chip ${titleOnly ? 'on' : ''}`} onClick={() => setTitleOnly(!titleOnly)}>
@@ -567,6 +623,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
           ]}
         />
       </div>
+      <div className="search-main">
       <div className="search-results">
         {askRow > 0 && (
           <div className={`menu-item search-ask ${active === 0 ? 'active' : ''}`} onMouseEnter={() => setActive(0)} onClick={() => pick(0)}>
@@ -597,13 +654,16 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
           )
         })}
       </div>
+      {preview && current && <SearchPreview id={current} onOpen={() => go(current)} />}
+      </div>
       <div className="search-foot">
         <span><kbd>↑↓</kbd> Select</span>
         <span><kbd>↵</kbd> Open</span>
         <span><kbd>Ctrl+L</kbd> Copy link</span>
         <span><kbd>Esc</kbd> Close</span>
       </div>
-    </Modal>
+    </div>
+    </div>
   )
 }
 

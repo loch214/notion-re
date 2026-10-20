@@ -74,6 +74,9 @@ const PATHS = {
   template: 'M4 4h12v12H4ZM4 8h12M8.5 8v8',
   timeline: 'M3.5 5.5h7M6.5 10h9M4.5 14.5h6',
   peek: 'M3.5 4.5h13v11h-13ZM11.5 4.5v11',
+  attach: 'M14.2 9.3 9.4 14.1a3.1 3.1 0 0 1-4.4-4.4l5.6-5.6a2.1 2.1 0 0 1 3 3l-5.5 5.5a1 1 0 0 1-1.5-1.5l5-5',
+  pencil: 'M13.3 3.7l3 3-9 9-3.6.6.6-3.6ZM11.6 5.4l3 3',
+  chat: 'M4 4.5h12v8.5H9l-3.5 3v-3H4Z',
 } as const
 
 export type IconName = keyof typeof PATHS

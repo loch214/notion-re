@@ -7,11 +7,13 @@
 //   GET  /api/history/version?page=&id=  → one version's blocks
 //   POST /api/history/restore {page, id} → put the page back to that version
 //   POST /api/history/name {page, id, name} → bookmark (name) a version, or clear the name
+//   GET  /api/chats · GET|PUT|DELETE /api/chats/ID · POST /api/chats/ID/rename → saved AI panel chats
 
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Connect, Plugin } from 'vite'
+import { chatStore } from './chats.ts'
 import { claudeBridge } from './claude-bridge.ts'
 import { getVersion, listVersions, nameVersion, recordWrite, restoreVersion } from './history.ts'
 import { applySync, loadWorkspace, saveWorkspace } from './workspace.ts'
@@ -58,6 +60,9 @@ function setup(root: string, middlewares: Connect.Server) {
   const TYPES: Record<string, string> = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
     mp4: 'video/mp4', webm: 'video/webm', pdf: 'application/pdf',
+    // Files attached in the AI panel for Claude to read.
+    txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', csv: 'text/plain; charset=utf-8', json: 'text/plain; charset=utf-8',
+    docx: 'application/octet-stream', xlsx: 'application/octet-stream', pptx: 'application/octet-stream',
   }
   middlewares.use('/api/files', async (req, res) => {
     if (req.method === 'GET') {
@@ -130,6 +135,29 @@ function setup(root: string, middlewares: Connect.Server) {
         return json(res, 200, { ok: true })
       }
       json(res, 404, { error: 'Not found' })
+    } catch (e: any) {
+      json(res, 400, { error: e.message })
+    }
+  })
+
+  const chats = chatStore(file)
+  middlewares.use('/api/chats', async (req, res) => {
+    const [id, action] = (req.url ?? '/').split('?')[0].split('/').filter(Boolean)
+    try {
+      if (req.method === 'GET') {
+        if (!id) return json(res, 200, chats.list())
+        const c = chats.get(id)
+        return c ? json(res, 200, c) : json(res, 404, { error: 'Chat not found' })
+      }
+      if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin write refused' })
+      if (!id) return json(res, 404, { error: 'Not found' })
+      if (req.method === 'PUT') return json(res, 200, chats.save({ ...JSON.parse(await readBody(req)), id }))
+      if (req.method === 'POST' && action === 'rename') return json(res, 200, chats.rename(id, String(JSON.parse(await readBody(req)).title ?? '')))
+      if (req.method === 'DELETE') {
+        chats.remove(id)
+        return json(res, 200, { ok: true })
+      }
+      json(res, 405, { error: 'Method not allowed' })
     } catch (e: any) {
       json(res, 400, { error: e.message })
     }
